@@ -1,0 +1,55 @@
+/* RESET */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #ffffff;
+  font-family: "Inter", Arial, sans-serif;
+  color: #222;
+  overflow-x: hidden;
+}
+
+/* GLOBAL LAYOUT WRAPPER */
+.page-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+}
+
+/* HERO IMAGE (como la del perro que tienes ahora) */
+.hero-image {
+  width: 100%;
+  max-width: 450px;
+  display: block;
+  margin: 0 auto 40px auto;
+}
+
+/* TITLES */
+h1,
+h2,
+h3 {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+/* TEXT */
+p,
+li {
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+/* LISTS */
+ul,
+ol {
+  margin-left: 20px;
+  margin-top: 10px;
+}
+
+/* SPACER */
+.section {
+  margin-bottom: 40px;
+}
