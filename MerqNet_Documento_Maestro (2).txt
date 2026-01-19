@@ -1,0 +1,148 @@
+MERQNET - DOCUMENTO MAESTRO (NOTEPAD VERSION)
+
+Este documento resume todas las reglas, decisiones, requisitos y
+estructuras definidas por Ricardo para el proyecto MerqNet. Es la
+referencia oficial del sistema de backend y frontend. Debe mantenerse
+sincronizado y nunca alterarse sin revisar los impactos globales.
+
+================================================================================ 1.
+IDENTIDAD Y ROLES
+================================================================================ -
+Ricardo = usuario principal (código: Metal). - ChatGPT debe siempre
+comunicarse en inglés para el código y la aplicación. - El usuario puede
+escribir en español, pero la APP debe estar en inglés. - Cuando el
+usuario escriba “Biblie Journal”, es su esposa. - Juntos: Metal (IA) +
+Maquina (usuario) = M&M.
+
+================================================================================
+2. ARQUITECTURA DEL SISTEMA MERQNET
+================================================================================
+Backend: Node.js + Express + MongoDB
+Frontend: React + Vite
+Payments: Stripe Elements
+Estilo visual: Arcade / Neón / Futurista
+Base de datos: shippingAddresses como array (max 3)
+
+================================================================================
+3. MODELO PRINCIPAL DE USUARIO (User.js)
+================================================================================
+Campos: - name - email - password - phone (con prefijo internacional
+escrito manualmente) - internationalTradeAvailable - profilePhoto -
+shippingAddresses[]: - streetAddress - city - state - country -
+postalCode - isDefault
+
+================================================================================
+4. SIGNUP.JSX Y SETTINGS.JSX - REGLAS FIJAS
+================================================================================ -
+Mismos campos exactos. - Dropdown funcional para country y state (de
+locationData.js). - city siempre texto libre. - phone permite +prefijo
+en el input. - shippingAddresses máximo 3, botón Add Address siempre
+visible. - Siempre debe permitir seleccionar dirección por defecto. -
+Después de Save Changes redirige a ProfileView.jsx - Diseño arcade,
+limpio, moderno.
+
+================================================================================
+5. PAYMENT METHODS (STRIPE ELEMENTS)
+================================================================================ -
+Eliminar inputs manuales para números de tarjeta. - Usar exclusivamente
+Stripe Elements (CardElement o CardNumber/CardExpiry/etc). - Debe
+mostrar: brand, last4, exp_month, exp_year. - Debe permitir listar,
+borrar y añadir. - No enviar datos de tarjeta al backend (solo
+PaymentMethod ID).
+
+================================================================================
+6. MATCH SYSTEM (MATCHES)
+================================================================================ -
+Solo el VENDEDOR puede recibir matches. - El comprador NO inicia
+contacto.
+- El comprador solo recibe pujas (bids). - Match = producto del vendedor
+compatible con un request del comprador. - Solo después de un match el
+vendedor puede pujar. - El comprador decide ganador según: - precio -
+localidad - reputación - preferencia personal (NO se asigna
+automáticamente)
+
+Endpoints: - POST /api/match/create - GET /api/match/seller/:sellerId -
+GET /api/match/check/:requestId/:sellerId
+
+================================================================================
+7. BIDS
+================================================================================ -
+Un vendedor solo puede pujar si existe un match previo. - El comprador
+ve sus bids en BuyerDashboard. - El vendedor ve sus bids enviados en
+SellerDashboard. - Cada bid debe mostrar botón “Ask the Seller” (solo en
+vista del comprador).
+
+================================================================================
+8. PRODUCTOS
+================================================================================ -
+Cada vendedor crea sus productos. - SellerDashboard muestra: - total
+products listed - total matches pending - botón para publicar
+productos - botón para ir a SellerMatches.jsx - Las rutas NO usan
+guiones (myproducts, no my-products).
+
+================================================================================
+9. REQUESTS Y COMPRADORES
+================================================================================ -
+Un comprador crea solicitudes (requests). - Los requests generan matches
+automáticos. - Solo el comprador recibe bids. - BuyerDashboard muestra
+requests, bids y estado general.
+
+================================================================================
+10. PROFILEVIEW.JSX
+================================================================================
+Debe mostrar: - disponibilidad para intercambio internacional -
+shippingAddress por defecto - score / rating numérico (1–10) -
+información relevante del usuario
+
+================================================================================
+11. HOME.JSX - REGLAS FIJAS
+================================================================================ -
+Fondo con Homepic1.png ligero. - Título MerqNet + pitch phrase. -
+Sección “How It Works”. - Footer con applogo1.png a la izquierda. -
+Leaderboard con 50 puntuaciones (1–10 exactos). - Iconos estilo arcade,
+tipo videojuego, animaciones.
+
+================================================================================
+12. DASHBOARD.JSX
+================================================================================ -
+Fondo dashboardpic.png. - Mostrar: - rating - live bids count - current
+requests - Botones con íconos. - NO mostrar información personal (solo
+en ProfileView.jsx).
+
+================================================================================
+13. NAVBAR
+================================================================================ -
+Debe mantener enlaces actuales. - Añadir indicador global de mensajes
+(badge). - Añadir botón hacia SellerMatches cuando corresponda. - Fondo
+gradiente fusionado con dashboardpic.
+
+================================================================================
+14. REQUESTS FLOW (FLUJOGRAMA LÓGICO)
+================================================================================ 1)
+Comprador crea request. 2) Sistema intenta match con productos de
+vendedores. 3) Si match existe → vendedor recibe notificación. 4)
+Vendedor decide si puja o ignora. 5) Vendedor hace bid. 6) Comprador
+recibe bids. 7) Comprador decide ganador. 8) Se redirige a pago
+(Stripe). 9) Generación de recibo.
+
+================================================================================
+15. REGLAS UNIVERSALES DEL PROYECTO
+================================================================================ -
+NO borrar ni modificar backend funcional. - NO crear nuevos
+controladores innecesarios. - Cada cambio debe verificarse en el
+navegador ANTES de continuar. - Nunca romper rutas existentes. - Nunca
+eliminar partes funcionales. - Todo código debe entregarse completo,
+nunca fragmentado. - TODO en inglés para la app (frontend y backend). -
+El usuario puede escribir en español, pero la app NO.
+
+================================================================================
+16. REGLA DE ORO FINAL
+================================================================================
+Después de modificar cualquier archivo: ✅ probar en el navegador
+✅ validar funcionalidad
+✅ corregir si falla
+❌ nunca avanzar sin verificar
+
+================================================================================
+FIN DEL DOCUMENTO MAESTRO MERQNET
+================================================================================

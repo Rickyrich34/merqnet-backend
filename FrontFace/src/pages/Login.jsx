@@ -1,217 +1,224 @@
-import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import axios from "axios";
 
 export default function Login() {
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [accepted, setAccepted] = useState(false);
+  const [formData, setFormData] = useState({
+    email: "",
+    password: "",
+    acceptTerms: false,
+  });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // IMPORTANT: Trim whitespace/newlines from Vercel env var and remove trailing slash
-  const API_BASE = (() => {
-    const raw = import.meta.env.VITE_API_URL || "http://localhost:5000";
-    return String(raw).trim().replace(/\/+$/, "");
-  })();
+  // ✅ IMPORTANT:
+  // - In DEV: allow localhost fallback for local backend dev.
+  // - In PROD: DO NOT fallback. Force VITE_API_URL to be set in Vercel.
+  const API_BASE = useMemo(() => {
+    const fromEnv = import.meta.env.VITE_API_URL;
 
-  const parseLoginPayload = (data) => {
-    const token =
-      data?.token ||
-      data?.accessToken ||
-      data?.jwt ||
-      data?.data?.token ||
-      null;
+    if (fromEnv && typeof fromEnv === "string") return fromEnv.replace(/\/$/, "");
 
-    const userId =
-      data?.userId ||
-      data?.id ||
-      data?._id ||
-      data?.user?._id ||
-      data?.user?.id ||
-      data?.data?.userId ||
-      data?.data?.user?._id ||
-      null;
+    if (import.meta.env.DEV) return "http://localhost:5000";
 
-    return { token, userId };
+    return ""; // production must not guess
+  }, []);
+
+  const API_LOGIN_URL = useMemo(() => {
+    if (!API_BASE) return "";
+    return `${API_BASE}/api/users/login`;
+  }, [API_BASE]);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
-  const hardRedirect = (path) => {
-    // Mobile Safari/Android sometimes behaves better with a hard redirect
-    window.location.assign(path);
+  const validate = () => {
+    if (!API_BASE || !API_LOGIN_URL) {
+      return "Missing VITE_API_URL in production. Set it in Vercel → Project → Settings → Environment Variables.";
+    }
+    if (!formData.email.trim()) return "Email is required.";
+    if (!formData.password) return "Password is required.";
+    if (!formData.acceptTerms) return "You must accept the Terms to continue.";
+    return "";
   };
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setError("");
 
-    if (!accepted) {
-      setError("You must accept the terms to continue.");
+    const v = validate();
+    if (v) {
+      setError(v);
       return;
     }
 
-    setLoading(true);
-    setError("");
-
     try {
-      const url = `${API_BASE}/api/users/login`;
+      setLoading(true);
 
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const contentType = res.headers.get("content-type") || "";
-      const isJson = contentType.includes("application/json");
-
-      if (!isJson) {
-        await res.text();
-        throw new Error(
-          `Login failed (${res.status}). Server returned non-JSON response.`
-        );
-      }
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.message || "Login failed");
-      }
-
-      const { token, userId } = parseLoginPayload(data);
-
-      if (!token || !userId) {
-        throw new Error(
-          "Login succeeded but backend did not return token/userId."
-        );
-      }
-
-      // ✅ Store in BOTH keys so nothing breaks anywhere (especially mobile guards)
-      localStorage.setItem("token", token);
-      localStorage.setItem("userToken", token);
-
-      localStorage.setItem("userId", userId);
-      localStorage.setItem("userID", userId);
-
-      // ✅ Navigate (soft), then fallback (hard) if mobile acts weird
-      navigate("/dashboard");
-      setTimeout(() => {
-        if (window.location.pathname !== "/dashboard") {
-          hardRedirect("/dashboard");
+      const res = await axios.post(
+        API_LOGIN_URL,
+        {
+          email: formData.email.trim(),
+          password: formData.password,
+        },
+        {
+          headers: { "Content-Type": "application/json" },
+          withCredentials: false,
         }
-      }, 200);
+      );
+
+      // Adjust these keys only if your backend uses different names
+      const token =
+        res?.data?.token ||
+        res?.data?.userToken ||
+        res?.data?.accessToken ||
+        "";
+
+      const userId =
+        res?.data?.userId ||
+        res?.data?.user?._id ||
+        res?.data?._id ||
+        "";
+
+      if (!token) {
+        throw new Error("Login succeeded but token was not returned by backend.");
+      }
+
+      // ✅ Keep consistent with your existing app usage
+      localStorage.setItem("userToken", token);
+      if (userId) localStorage.setItem("userId", userId);
+
+      // ✅ Send user to dashboard after login
+      navigate("/dashboard");
     } catch (err) {
-      setError(err?.message || "Login failed");
+      const msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Login failed.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div
-      className="
-        flex flex-col
-        bg-gradient-to-b from-[#05050c] to-[#0a0a1a]
-        text-white
-        px-4
-        [min-height:100svh]
-        pt-[calc(5rem+env(safe-area-inset-top))]
-        pb-[calc(7.5rem+env(safe-area-inset-bottom))]
-      "
-    >
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <form
-          onSubmit={handleSubmit}
-          className="w-full max-w-[380px] bg-[#0c0c1c] p-8 rounded-2xl shadow-xl border border-purple-500/20"
-        >
-          <h2 className="text-2xl font-bold text-center mb-6">Login</h2>
+    <div className="min-h-screen w-full bg-black text-white relative overflow-hidden">
+      {/* Background glow */}
+      <div className="absolute inset-0 opacity-70">
+        <div className="absolute -top-40 -left-40 h-[520px] w-[520px] rounded-full blur-3xl bg-fuchsia-600/30" />
+        <div className="absolute -bottom-48 -right-48 h-[620px] w-[620px] rounded-full blur-3xl bg-cyan-500/25" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black via-black/80 to-black" />
+      </div>
+
+      <div className="relative z-10 flex items-center justify-center px-4 py-10">
+        <div className="w-full max-w-md rounded-2xl border border-white/15 bg-white/5 backdrop-blur-xl shadow-2xl p-6">
+          <div className="mb-6">
+            <h1 className="text-3xl font-extrabold tracking-tight">
+              MerqNet <span className="text-cyan-300">Login</span>
+            </h1>
+            <p className="text-sm text-white/70 mt-1">
+              Enter your credentials to access your dashboard.
+            </p>
+
+            {/* Helpful prod hint */}
+            {!import.meta.env.DEV && !API_BASE && (
+              <div className="mt-3 rounded-lg border border-yellow-400/30 bg-yellow-400/10 p-3 text-xs text-yellow-100">
+                <b>Config needed:</b> Set <code className="px-1">VITE_API_URL</code> in Vercel or login will try to hit localhost.
+              </div>
+            )}
+          </div>
 
           {error && (
-            <div className="bg-red-500/20 border border-red-500 text-red-300 p-2 rounded mb-4 text-sm">
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
               {error}
             </div>
           )}
 
-          <div className="mb-4">
-            <label className="block mb-1 text-sm">Email</label>
-            <input
-              type="email"
-              className="w-full p-2 rounded bg-[#11112a] border border-purple-500/20 focus:outline-none"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-            />
-          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-white/80 mb-1">
+                Email
+              </label>
+              <input
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={handleChange}
+                autoComplete="email"
+                className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-white placeholder-white/40 outline-none focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/20"
+                placeholder="you@email.com"
+              />
+            </div>
 
-          <div className="mb-4">
-            <label className="block mb-1 text-sm">Password</label>
-            <input
-              type="password"
-              className="w-full p-2 rounded bg-[#11112a] border border-purple-500/20 focus:outline-none"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
-          </div>
+            <div>
+              <label className="block text-sm font-semibold text-white/80 mb-1">
+                Password
+              </label>
+              <input
+                name="password"
+                type="password"
+                value={formData.password}
+                onChange={handleChange}
+                autoComplete="current-password"
+                className="w-full rounded-xl border border-white/15 bg-black/40 px-4 py-3 text-white placeholder-white/40 outline-none focus:border-fuchsia-400/60 focus:ring-2 focus:ring-fuchsia-400/20"
+                placeholder="••••••••"
+              />
+            </div>
 
-          <div className="flex items-start gap-2 mb-4 text-xs text-gray-300">
-            <input
-              type="checkbox"
-              checked={accepted}
-              onChange={(e) => setAccepted(e.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              By logging in, you accept our{" "}
-              <Link
-                to="/terms"
-                className="text-purple-400 hover:underline underline-offset-2"
-              >
-                Terms of Service
-              </Link>{" "}
-              and{" "}
-              <Link
-                to="/privacy"
-                className="text-purple-400 hover:underline underline-offset-2"
-              >
-                Privacy Policy
-              </Link>
-              .
-            </span>
-          </div>
+            <div className="flex items-start gap-3">
+              <input
+                name="acceptTerms"
+                type="checkbox"
+                checked={formData.acceptTerms}
+                onChange={handleChange}
+                className="mt-1 h-4 w-4 accent-cyan-400"
+              />
+              <p className="text-sm text-white/75 leading-snug">
+                I agree to the{" "}
+                <Link to="/terms" className="text-cyan-300 hover:underline">
+                  Terms
+                </Link>{" "}
+                and{" "}
+                <Link to="/privacy" className="text-cyan-300 hover:underline">
+                  Privacy Policy
+                </Link>
+                .
+              </p>
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-purple-600 hover:bg-purple-700 transition p-2 rounded font-semibold disabled:opacity-50"
-          >
-            {loading ? "Logging in..." : "Log In"}
-          </button>
-
-          <div className="mt-4 text-center text-sm text-white/70">
-            Don’t have an account?{" "}
-            <Link
-              to="/signup"
-              className="text-cyan-300 hover:text-cyan-200 underline underline-offset-4"
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl bg-gradient-to-r from-cyan-400 to-fuchsia-500 px-4 py-3 font-bold text-black shadow-lg shadow-fuchsia-500/20 hover:opacity-95 disabled:opacity-50"
             >
-              Sign up
-            </Link>
-          </div>
+              {loading ? "Logging in..." : "Login"}
+            </button>
 
-          <button
-            type="button"
-            onClick={() => navigate("/about")}
-            className="mt-4 w-full text-sm text-cyan-300/80 hover:text-cyan-200 transition text-center"
-          >
-            How it works?
-          </button>
-        </form>
-      </div>
+            <div className="flex items-center justify-between text-sm text-white/70">
+              <Link to="/signup" className="text-cyan-300 hover:underline">
+                Don’t have an account? Sign up
+              </Link>
 
-      <div className="mt-auto text-center text-xs text-gray-500">
-        © 2026 MerqNet. All Rights Reserved.
+              <Link to="/help" className="text-white/70 hover:text-white">
+                Need help?
+              </Link>
+            </div>
+
+            {/* Debug line (optional) */}
+            <div className="pt-2 text-[11px] text-white/35">
+              API: {API_BASE ? API_BASE : "(missing in production)"}
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );

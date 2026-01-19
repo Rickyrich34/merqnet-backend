@@ -1,0 +1,17 @@
+{
+  "fullName": "Demo User",
+  "email": "demo@merqnet.com",
+  "password": "demo123",
+  "phone": "+17870000000",
+  "shippingAddresses": [
+    {
+      "addressLine1": "Calle 1 #123",
+      "addressLine2": "",
+      "state": "PR",
+      "country": "Puerto Rico",
+      "postalCode": "00959",
+      "isDefault": true
+    }
+  ],
+  "acceptsInternationalTrade": false
+}
