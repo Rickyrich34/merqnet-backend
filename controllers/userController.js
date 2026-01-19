@@ -14,7 +14,15 @@ const generateToken = (id) => {
 // ============================
 exports.registerUser = async (req, res) => {
   try {
-    const { fullName, email, phone, password, acceptsInternationalTrade, shippingAddresses, profileImage } = req.body;
+    const {
+      fullName,
+      email,
+      phone,
+      password,
+      acceptsInternationalTrade,
+      shippingAddresses,
+      profileImage,
+    } = req.body;
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -31,19 +39,19 @@ exports.registerUser = async (req, res) => {
       profileImage,
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "User registered successfully",
       user: newUser,
       token: generateToken(newUser._id),
     });
   } catch (err) {
     console.error("Error registering user:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
 // ============================
-// ✅ LOGIN USER
+// ✅ LOGIN USER (MIN FIX)
 // ============================
 exports.loginUser = async (req, res) => {
   try {
@@ -59,10 +67,12 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    res.status(200).json({
+    // ✅ Keep existing response shape + add userId top-level (non-breaking)
+    return res.status(200).json({
       message: "Login successful",
+      userId: user._id, // ✅ added (safe)
       user: {
-        id: user._id,
+        id: user._id, // keep existing
         email: user.email,
         fullName: user.fullName,
       },
@@ -70,7 +80,7 @@ exports.loginUser = async (req, res) => {
     });
   } catch (err) {
     console.error("Error logging in:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -83,10 +93,10 @@ exports.getProfile = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.status(200).json(user);
+    return res.status(200).json(user);
   } catch (err) {
     console.error("Error fetching profile:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -104,12 +114,12 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Profile updated successfully",
       user: updated,
     });
   } catch (err) {
     console.error("Error updating profile:", err);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
