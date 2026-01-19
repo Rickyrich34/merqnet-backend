@@ -63,6 +63,9 @@ export default function Login() {
     try {
       setLoading(true);
 
+      // ✅ IMPORTANT: Prove which URL production is actually calling
+      console.log("LOGIN URL =>", API_LOGIN_URL);
+
       const res = await axios.post(
         API_LOGIN_URL,
         {
@@ -72,6 +75,7 @@ export default function Login() {
         {
           headers: { "Content-Type": "application/json" },
           withCredentials: false,
+          timeout: 15000, // ✅ prevents “forever logging in”
         }
       );
 
@@ -99,11 +103,15 @@ export default function Login() {
       // ✅ Send user to dashboard after login
       navigate("/dashboard");
     } catch (err) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        err?.message ||
-        "Login failed.";
+      const isTimeout = err?.code === "ECONNABORTED";
+
+      const msg = isTimeout
+        ? "Login request timed out (15s). Backend may be sleeping, unreachable, or blocked by CORS."
+        : err?.response?.data?.message ||
+          err?.response?.data?.error ||
+          err?.message ||
+          "Login failed.";
+
       setError(msg);
     } finally {
       setLoading(false);
