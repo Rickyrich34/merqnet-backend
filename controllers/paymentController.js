@@ -1,15 +1,35 @@
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+// controllers/paymentController.js
+
+const Stripe = require("stripe");
 
 const User = require("../models/User");
 const Bid = require("../models/Bid");
 const Request = require("../models/Request");
 const Receipt = require("../models/Receipt");
 
+// Lazy Stripe init to avoid crashing the whole server when STRIPE_SECRET_KEY is missing
+let stripeClient = null;
+function getStripe() {
+  if (stripeClient) return stripeClient;
+
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    // IMPORTANT: Do NOT throw at module load time. We return a controlled error in handlers instead.
+    return null;
+  }
+
+  stripeClient = new Stripe(key);
+  return stripeClient;
+}
+
 const getAuthUserId = (req) => req.user?.id || null;
 
 const makeReceiptId = () => `REC-${Math.floor(100000 + Math.random() * 900000)}`;
 
 async function ensureStripeCustomer(user) {
+  const stripe = getStripe();
+  if (!stripe) return null;
+
   if (user.stripeCustomerId) return user.stripeCustomerId;
 
   const customer = await stripe.customers.create({ email: user.email });
@@ -19,6 +39,9 @@ async function ensureStripeCustomer(user) {
 }
 
 async function setStripeDefaultSource(customerId, sourceId) {
+  const stripe = getStripe();
+  if (!stripe) return null;
+
   return stripe.customers.update(customerId, { default_source: sourceId });
 }
 
@@ -35,6 +58,13 @@ async function ensureLocalDefaultCard(user) {
   }
 
   return def;
+}
+
+function stripeEnvError(res) {
+  return res.status(500).json({
+    message:
+      "Stripe is not configured on the server. Missing STRIPE_SECRET_KEY environment variable.",
+  });
 }
 
 // -----------------------------
@@ -61,6 +91,9 @@ exports.getCards = async (req, res) => {
 // -----------------------------
 exports.addCard = async (req, res) => {
   try {
+    const stripe = getStripe();
+    if (!stripe) return stripeEnvError(res);
+
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -71,6 +104,8 @@ exports.addCard = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const customerId = await ensureStripeCustomer(user);
+    if (!customerId) return stripeEnvError(res);
+
     const source = await stripe.customers.createSource(customerId, { source: tokenId });
 
     const newCard = {
@@ -121,6 +156,9 @@ exports.addCard = async (req, res) => {
 // -----------------------------
 exports.deleteCard = async (req, res) => {
   try {
+    const stripe = getStripe();
+    if (!stripe) return stripeEnvError(res);
+
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -134,6 +172,8 @@ exports.deleteCard = async (req, res) => {
     if (idx === -1) return res.status(404).json({ message: "Card not found" });
 
     const customerId = await ensureStripeCustomer(user);
+    if (!customerId) return stripeEnvError(res);
+
     const removed = user.cards[idx];
 
     user.cards.splice(idx, 1);
@@ -165,6 +205,9 @@ exports.deleteCard = async (req, res) => {
 // -----------------------------
 exports.setDefaultCard = async (req, res) => {
   try {
+    const stripe = getStripe();
+    if (!stripe) return stripeEnvError(res);
+
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -182,6 +225,8 @@ exports.setDefaultCard = async (req, res) => {
     await user.save();
 
     const customerId = await ensureStripeCustomer(user);
+    if (!customerId) return stripeEnvError(res);
+
     try {
       await setStripeDefaultSource(customerId, target.stripeSourceId);
     } catch {}
@@ -198,6 +243,9 @@ exports.setDefaultCard = async (req, res) => {
 // -----------------------------
 exports.payNow = async (req, res) => {
   try {
+    const stripe = getStripe();
+    if (!stripe) return stripeEnvError(res);
+
     const userId = getAuthUserId(req);
     const { requestId, bidId } = req.body || {};
 
@@ -263,6 +311,7 @@ exports.payNow = async (req, res) => {
 
     const amountCents = Math.round(total * 100);
     const customerId = await ensureStripeCustomer(user);
+    if (!customerId) return stripeEnvError(res);
 
     try {
       await setStripeDefaultSource(customerId, sourceId);
