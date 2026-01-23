@@ -58,4 +58,7 @@ const ReceiptSchema = new Schema(
   { timestamps: true }
 );
 
+// ✅ Compound index to speed up seller-rating aggregation (safe + backward compatible)
+ReceiptSchema.index({ sellerId: 1, "rating.value": 1, createdAt: -1 });
+
 module.exports = mongoose.model("Receipt", ReceiptSchema);

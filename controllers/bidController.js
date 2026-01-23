@@ -8,46 +8,59 @@ const Receipt = require("../models/Receipt");
 const DAYS_30_MS = 30 * 24 * 60 * 60 * 1000;
 const PAYMENT_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h to pay
 
+// ✅ Ratings aggregation safety (prevents request hang/timeouts)
+const RATING_WINDOW_DAYS = 180; // only scan last 180 days of receipts
+const RATING_AGG_MAX_MS = 2500; // hard stop so the endpoint never stalls
+
 // ----------------------------- RATING HELPERS -----------------------------
 async function buildSellerRatingMap(sellerIds) {
-  if (!Array.isArray(sellerIds) || sellerIds.length === 0) return {};
+  try {
+    if (!Array.isArray(sellerIds) || sellerIds.length === 0) return {};
 
-  const objIds = sellerIds
-    .map((id) => {
-      try {
-        return new mongoose.Types.ObjectId(String(id));
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+    const objIds = sellerIds
+      .map((id) => {
+        try {
+          return new mongoose.Types.ObjectId(String(id));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
 
-  if (objIds.length === 0) return {};
+    if (objIds.length === 0) return {};
 
-  // avg + count from receipts that have rating.value
-  const agg = await Receipt.aggregate([
-    {
-      $match: {
-        sellerId: { $in: objIds },
-        "rating.value": { $exists: true, $ne: null },
+    const cutoff = new Date(Date.now() - RATING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+    // avg + count from receipts that have rating.value
+    const agg = await Receipt.aggregate([
+      {
+        $match: {
+          sellerId: { $in: objIds },
+          "rating.value": { $exists: true, $ne: null },
+          createdAt: { $gte: cutoff },
+        },
       },
-    },
-    {
-      $group: {
-        _id: "$sellerId",
-        avgRating: { $avg: "$rating.value" },
-        ratingCount: { $sum: 1 },
+      {
+        $group: {
+          _id: "$sellerId",
+          avgRating: { $avg: "$rating.value" },
+          ratingCount: { $sum: 1 },
+        },
       },
-    },
-  ]);
+    ]).option({ allowDiskUse: true, maxTimeMS: RATING_AGG_MAX_MS });
 
-  return agg.reduce((acc, row) => {
-    acc[String(row._id)] = {
-      sellerRating: Number(row.avgRating || 0),
-      sellerRatingCount: Number(row.ratingCount || 0),
-    };
-    return acc;
-  }, {});
+    return agg.reduce((acc, row) => {
+      acc[String(row._id)] = {
+        sellerRating: Number(row.avgRating || 0),
+        sellerRatingCount: Number(row.ratingCount || 0),
+      };
+      return acc;
+    }, {});
+  } catch (err) {
+    // ✅ Never let ratings block bids loading
+    console.warn("buildSellerRatingMap fallback (aggregation skipped):", err?.message || err);
+    return {};
+  }
 }
 
 function attachRatingToBidObject(bidObj, ratingMap) {
