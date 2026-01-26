@@ -5,11 +5,22 @@ export default function RatingModal({ open, onClose, onSubmit, loading }) {
   const [reasons, setReasons] = useState([]);
   const [comment, setComment] = useState("");
 
+  // Reset when opened
   useEffect(() => {
     if (!open) return;
     setValue(8.0);
     setReasons([]);
     setComment("");
+  }, [open]);
+
+  // ✅ MOBILE FIX: lock background scroll while modal is open
+  useEffect(() => {
+    if (open) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "auto";
+
+    return () => {
+      document.body.style.overflow = "auto";
+    };
   }, [open]);
 
   const tipText = useMemo(() => {
@@ -50,14 +61,18 @@ export default function RatingModal({ open, onClose, onSubmit, loading }) {
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      {/* backdrop */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={() => (loading ? null : onClose())}
-      />
+  const handleBackdropClick = (e) => {
+    if (e.target === e.currentTarget && !loading) onClose();
+  };
 
+  return (
+    // ✅ MOBILE FIX: full screen overlay + very high z-index
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm px-4"
+      onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+    >
       {/* modal */}
       <div className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-gradient-to-b from-[#0b0620] to-[#050012] shadow-2xl">
         <div className="flex items-start justify-between p-5 border-b border-white/10">
@@ -69,8 +84,9 @@ export default function RatingModal({ open, onClose, onSubmit, loading }) {
           </div>
 
           <button
-            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm transition"
+            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm transition disabled:opacity-60"
             onClick={() => (loading ? null : onClose())}
+            disabled={loading}
           >
             Close
           </button>
@@ -108,7 +124,8 @@ export default function RatingModal({ open, onClose, onSubmit, loading }) {
           {/* reasons */}
           <div className="mt-5">
             <div className="text-sm font-semibold text-white mb-2">
-              What influenced your rating? <span className="text-white/50">(optional)</span>
+              What influenced your rating?{" "}
+              <span className="text-white/50">(optional)</span>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -139,9 +156,12 @@ export default function RatingModal({ open, onClose, onSubmit, loading }) {
           <div className="mt-5">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-semibold text-white">
-                Optional comment <span className="text-white/50">(max 200 chars)</span>
+                Optional comment{" "}
+                <span className="text-white/50">(max 200 chars)</span>
               </div>
-              <div className="text-xs text-white/50">{comment.length}/200</div>
+              <div className="text-xs text-white/50">
+                {comment.length}/200
+              </div>
             </div>
 
             <textarea
