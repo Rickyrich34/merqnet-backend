@@ -304,12 +304,18 @@ exports.payNow = async (req, res) => {
       });
     }
 
-    const total = Number(bid.totalPrice);
-    if (!Number.isFinite(total) || total <= 0) {
+    // ✅ ORIGINAL subtotal is bid.totalPrice
+    const subtotal = Number(bid.totalPrice);
+    if (!Number.isFinite(subtotal) || subtotal <= 0) {
       return res.status(400).json({ message: "Invalid bid total price" });
     }
 
-    const amountCents = Math.round(total * 100);
+    // ✅ MerqNet fee (6%) — buyer pays subtotal + fee
+    const merqnetFee = Number((subtotal * 0.06).toFixed(2));
+    const totalToCharge = Number((subtotal + merqnetFee).toFixed(2));
+
+    const amountCents = Math.round(totalToCharge * 100);
+
     const customerId = await ensureStripeCustomer(user);
     if (!customerId) return stripeEnvError(res);
 
@@ -327,6 +333,11 @@ exports.payNow = async (req, res) => {
         bidId: String(bidId),
         buyerId: String(user._id),
         sellerId: String(bid.sellerId),
+
+        // ✅ fee visibility (no behavior change)
+        subtotal: String(subtotal),
+        merqnetFee: String(merqnetFee),
+        totalCharged: String(totalToCharge),
       },
     });
 
@@ -343,7 +354,9 @@ exports.payNow = async (req, res) => {
       bidId: bid._id,
       buyerId: user._id,
       sellerId: bid.sellerId,
-      amount: total,
+
+      // ✅ store what buyer actually paid (subtotal + fee)
+      amount: totalToCharge,
       currency: "usd",
 
       stripeChargeId: charge.id,
