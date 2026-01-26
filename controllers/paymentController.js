@@ -1,37 +1,16 @@
-// =====================================
 // backend/controllers/paymentController.js
-// =====================================
-const Stripe = require("stripe");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const User = require("../models/User");
 const Bid = require("../models/Bid");
 const Request = require("../models/Request");
 const Receipt = require("../models/Receipt");
 
-// Lazy Stripe init (never crash server on missing env)
-let stripeClient = null;
-function getStripe() {
-  if (stripeClient) return stripeClient;
+const getAuthUserId = (req) => req.user?.id || null;
 
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return null;
+const makeReceiptId = () => `REC-${Math.floor(100000 + Math.random() * 900000)}`;
 
-  stripeClient = new Stripe(key);
-  return stripeClient;
-}
-
-function stripeEnvError(res) {
-  return res.status(500).json({
-    message: "Stripe is not configured on the server. Missing STRIPE_SECRET_KEY.",
-  });
-}
-
-const getAuthUserId = (req) => req.user?.id || req.user?._id || null;
-
-const makeReceiptId = () =>
-  `REC-${Math.floor(100000 + Math.random() * 900000)}`;
-
-async function ensureStripeCustomer(user, stripe) {
+async function ensureStripeCustomer(user) {
   if (user.stripeCustomerId) return user.stripeCustomerId;
 
   const customer = await stripe.customers.create({ email: user.email });
@@ -40,13 +19,18 @@ async function ensureStripeCustomer(user, stripe) {
   return customer.id;
 }
 
+async function setStripeDefaultSource(customerId, sourceId) {
+  // In Charges flow, "default_source" is used for charging.
+  // This will make stripe.charges.create pick it up.
+  return stripe.customers.update(customerId, { default_source: sourceId });
+}
+
 async function ensureLocalDefaultCard(user) {
   if (!Array.isArray(user.cards)) user.cards = [];
   if (user.cards.length === 0) return null;
 
   let def = user.cards.find((c) => c.isDefault) || null;
 
-  // If none marked default, force first as default (keeps old behavior stable)
   if (!def) {
     user.cards.forEach((c, i) => (c.isDefault = i === 0));
     await user.save();
@@ -62,14 +46,10 @@ async function ensureLocalDefaultCard(user) {
 exports.getCards = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized", cards: [] });
-    }
+    if (!userId) return res.status(401).json({ message: "Unauthorized", cards: [] });
 
     const user = await User.findById(userId).select("cards");
-    if (!user) {
-      return res.status(404).json({ message: "User not found", cards: [] });
-    }
+    if (!user) return res.status(404).json({ message: "User not found", cards: [] });
 
     const cards = Array.isArray(user.cards) ? user.cards : [];
     return res.status(200).json({ cards });
@@ -80,79 +60,73 @@ exports.getCards = async (req, res) => {
 };
 
 // -----------------------------
-// ADD CARD (Frontend sends { paymentMethodId: "pm_..." })
-// IMPORTANT: Save fields matching User.js schema (exp_month / exp_year).
+// ADD CARD (tokenId from Stripe Elements)
 // -----------------------------
 exports.addCard = async (req, res) => {
   try {
-    const stripe = getStripe();
-    if (!stripe) return stripeEnvError(res);
-
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { paymentMethodId } = req.body || {};
-    if (!paymentMethodId) {
-      return res.status(400).json({ message: "Missing paymentMethodId" });
-    }
+    const { tokenId, makeDefault } = req.body || {};
+    if (!tokenId) return res.status(400).json({ message: "Missing tokenId" });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const customerId = await ensureStripeCustomer(user, stripe);
+    const customerId = await ensureStripeCustomer(user);
 
-    // Attach PM to customer (safe if already attached)
-    try {
-      await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
-    } catch (e) {
-      const msg = String(e?.message || "");
-      if (!msg.toLowerCase().includes("already")) {
-        console.error("attach paymentMethod error:", e);
-        return res.status(400).json({ message: "Failed to attach payment method" });
-      }
-    }
+    // Attach card to customer using token
+    const source = await stripe.customers.createSource(customerId, { source: tokenId });
 
-    const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
-    const card = pm?.card || {};
-
-    const brand = card?.brand ? String(card.brand) : "";
-    const last4 = card?.last4 || "----";
-    const exp_month = card?.exp_month ?? null;
-    const exp_year = card?.exp_year ?? null;
+    // Store minimal card meta locally
+    const newCard = {
+      stripeSourceId: source.id,
+      brand: source.brand || "Card",
+      last4: source.last4,
+      exp_month: source.exp_month,
+      exp_year: source.exp_year,
+      isDefault: !!makeDefault,
+    };
 
     if (!Array.isArray(user.cards)) user.cards = [];
 
-    // Avoid duplicates by last4+brand+exp (lo más seguro con schema legacy)
-    const exists = user.cards.some(
-      (c) =>
-        String(c.last4) === String(last4) &&
-        String(c.brand).toLowerCase() === String(brand).toLowerCase() &&
-        Number(c.exp_month) === Number(exp_month) &&
-        Number(c.exp_year) === Number(exp_year)
-    );
+    if (makeDefault) {
+      user.cards.forEach((c) => (c.isDefault = false));
+      newCard.isDefault = true;
 
-    if (!exists) {
-      user.cards.push({
-        brand,
-        last4,
-        exp_month,
-        exp_year,
+      try {
+        await setStripeDefaultSource(customerId, source.id);
+      } catch (e) {
+        console.warn("set default_source failed:", e.message);
+      }
+    } else if (user.cards.length === 0) {
+      // first card should become default
+      user.cards.forEach((c) => (c.isDefault = false));
+      newCard.isDefault = true;
 
-        // Legacy schema has stripeSourceId; keep it empty for pm_ cards.
-        stripeSourceId: "",
-
-        // If your schema later includes this field, it will persist.
-        // If not, Mongo/Mongoose will ignore it (no break).
-        stripePaymentMethodId: paymentMethodId,
-
-        isDefault: user.cards.length === 0,
-      });
+      try {
+        await setStripeDefaultSource(customerId, source.id);
+      } catch (e) {
+        console.warn("set default_source failed:", e.message);
+      }
     }
 
-    await ensureLocalDefaultCard(user);
+    // prevent duplicates by last4+exp
+    const dup = user.cards.find(
+      (c) => c.last4 === newCard.last4 && c.exp_year === newCard.exp_year && c.exp_month === newCard.exp_month
+    );
+    if (dup) {
+      // If duplicate, delete newly created source to avoid clutter
+      try {
+        await stripe.customers.deleteSource(customerId, source.id);
+      } catch {}
+      return res.status(400).json({ message: "Card already exists" });
+    }
+
+    user.cards.push(newCard);
     await user.save();
 
-    return res.status(200).json({ message: "Card added" });
+    return res.status(201).json({ message: "Card saved", card: newCard });
   } catch (err) {
     console.error("addCard error:", err);
     return res.status(500).json({ message: "Failed to add card" });
@@ -160,60 +134,91 @@ exports.addCard = async (req, res) => {
 };
 
 // -----------------------------
-// SET DEFAULT CARD
-// Supports BOTH:
-// - { stripePaymentMethodId: "pm_..." }
-// - { stripeSourceId: "card_..." }
-// - { cardId: "<mongo card _id>" }  (optional safe fallback)
+// DELETE CARD (param = last4, based on your current model)
 // -----------------------------
-exports.setDefaultCard = async (req, res) => {
+exports.deleteCard = async (req, res) => {
   try {
-    const stripe = getStripe();
-    if (!stripe) return stripeEnvError(res);
-
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { stripePaymentMethodId, stripeSourceId, cardId } = req.body || {};
-
-    if (!stripePaymentMethodId && !stripeSourceId && !cardId) {
-      return res.status(400).json({
-        message: "Missing stripePaymentMethodId or stripeSourceId or cardId",
-      });
-    }
+    const { cardId } = req.params; // your routes name it :cardId
+    const last4 = String(cardId || "");
 
     const user = await User.findById(userId);
-    if (!user || !Array.isArray(user.cards)) {
-      return res.status(404).json({ message: "User or cards not found" });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!Array.isArray(user.cards) || user.cards.length === 0) {
+      return res.status(404).json({ message: "No cards found" });
     }
 
-    const target = user.cards.find((c) => {
-      if (cardId && String(c._id) === String(cardId)) return true;
-      if (stripePaymentMethodId && c.stripePaymentMethodId === stripePaymentMethodId) return true;
-      if (stripeSourceId && c.stripeSourceId === stripeSourceId) return true;
-      return false;
-    });
+    const idx = user.cards.findIndex((c) => String(c.last4) === last4);
+    if (idx === -1) return res.status(404).json({ message: "Card not found" });
 
+    const customerId = await ensureStripeCustomer(user);
+
+    const removed = user.cards[idx];
+    user.cards.splice(idx, 1);
+
+    // If removed default, set new default
+    if (removed.isDefault && user.cards.length > 0) {
+      user.cards.forEach((c, i) => (c.isDefault = i === 0));
+      try {
+        await setStripeDefaultSource(customerId, user.cards[0].stripeSourceId);
+      } catch (e) {
+        console.warn("default_source update failed:", e.message);
+      }
+    }
+
+    await user.save();
+
+    // Remove from Stripe customer too
+    if (removed.stripeSourceId) {
+      try {
+        await stripe.customers.deleteSource(customerId, removed.stripeSourceId);
+      } catch (e) {
+        console.warn("deleteSource failed:", e.message);
+      }
+    }
+
+    return res.status(200).json({ message: "Card deleted" });
+  } catch (err) {
+    console.error("deleteCard error:", err);
+    return res.status(500).json({ message: "Failed to delete card" });
+  }
+};
+
+// -----------------------------
+// SET DEFAULT CARD (param = last4, based on your current model)
+// -----------------------------
+exports.setDefaultCard = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const { cardId } = req.params;
+    const last4 = String(cardId || "");
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!Array.isArray(user.cards) || user.cards.length === 0) {
+      return res.status(404).json({ message: "No cards found" });
+    }
+
+    const target = user.cards.find((c) => String(c.last4) === last4);
     if (!target) return res.status(404).json({ message: "Card not found" });
 
     user.cards.forEach((c) => (c.isDefault = false));
     target.isDefault = true;
     await user.save();
 
-    // Only update Stripe invoice default if we have a pm_ id
-    const pmId =
-      target.stripePaymentMethodId && String(target.stripePaymentMethodId).startsWith("pm_")
-        ? target.stripePaymentMethodId
-        : "";
+    const customerId = await ensureStripeCustomer(user);
 
-    if (pmId) {
-      const customerId = await ensureStripeCustomer(user, stripe);
+    if (target.stripeSourceId) {
       try {
-        await stripe.customers.update(customerId, {
-          invoice_settings: { default_payment_method: pmId },
-        });
+        await setStripeDefaultSource(customerId, target.stripeSourceId);
       } catch (e) {
-        console.error("stripe set default PM error:", e);
+        console.warn("default_source update failed:", e.message);
       }
     }
 
@@ -225,120 +230,40 @@ exports.setDefaultCard = async (req, res) => {
 };
 
 // -----------------------------
-// DELETE CARD
-// -----------------------------
-exports.deleteCard = async (req, res) => {
-  try {
-    const stripe = getStripe();
-    if (!stripe) return stripeEnvError(res);
-
-    const userId = getAuthUserId(req);
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
-
-    const id = String(req.params.id || "");
-    if (!id) return res.status(400).json({ message: "Missing card id" });
-
-    const user = await User.findById(userId);
-    if (!user || !Array.isArray(user.cards)) {
-      return res.status(404).json({ message: "User or cards not found" });
-    }
-
-    const idx = user.cards.findIndex((c) => String(c._id) === id);
-    if (idx === -1) return res.status(404).json({ message: "Card not found" });
-
-    const removed = user.cards[idx];
-    user.cards.splice(idx, 1);
-
-    // Keep a default card if any remain
-    if (removed?.isDefault && user.cards.length > 0) {
-      user.cards.forEach((c, i) => (c.isDefault = i === 0));
-    }
-
-    await user.save();
-
-    // If it was a pm_ card, detach from Stripe customer (safe if already detached)
-    try {
-      if (user.stripeCustomerId && removed?.stripePaymentMethodId) {
-        await stripe.paymentMethods.detach(removed.stripePaymentMethodId);
-      }
-    } catch (_) {}
-
-    return res.status(200).json({ message: "Card deleted" });
-  } catch (err) {
-    console.error("deleteCard error:", err);
-    return res.status(500).json({ message: "Failed to delete card" });
-  }
-};
-
-// -----------------------------
-// SUMMARY
-// -----------------------------
-exports.getSummary = async (req, res) => {
-  try {
-    const userId = getAuthUserId(req);
-    const { bidId } = req.params || {};
-
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    if (!bidId) return res.status(400).json({ message: "Missing bidId" });
-
-    const bid = await Bid.findById(bidId);
-    if (!bid) return res.status(404).json({ message: "Bid not found" });
-
-    const request = await Request.findById(bid.requestId);
-    if (!request) return res.status(404).json({ message: "Request not found" });
-
-    const buyerId = request.clientID || request.clientId;
-    if (String(buyerId) !== String(userId)) {
-      return res.status(403).json({ message: "Forbidden" });
-    }
-
-    return res.status(200).json({ bid, request });
-  } catch (err) {
-    console.error("getSummary error:", err);
-    return res.status(500).json({ message: "Failed to load summary" });
-  }
-};
-
-// -----------------------------
-// PAY NOW
-// - Uses pm_ (PaymentIntents) if available
-// - Uses card_ (Charges legacy) if available
-// - NEVER blocks a valid legacy card_
+// PAY NOW (charges API)
 // -----------------------------
 exports.payNow = async (req, res) => {
   try {
-    const stripe = getStripe();
-    if (!stripe) return stripeEnvError(res);
-
     const userId = getAuthUserId(req);
-    const { bidId } = req.body || {};
+    const { requestId, bidId } = req.body || {};
 
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    if (!bidId) return res.status(400).json({ message: "Missing bidId" });
+    if (!requestId || !bidId) return res.status(400).json({ message: "Missing requestId or bidId" });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    const request = await Request.findById(requestId);
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    // Buyer-only payment
+    if (String(request.clientID) !== String(user._id)) {
+      return res.status(403).json({ message: "Forbidden: only buyer can pay" });
+    }
+
     const bid = await Bid.findById(bidId);
     if (!bid) return res.status(404).json({ message: "Bid not found" });
 
-    const request = await Request.findById(bid.requestId);
-    if (!request) return res.status(404).json({ message: "Request not found" });
-
-    const buyerId = request.clientID || request.clientId;
-    if (String(buyerId) !== String(user._id)) {
-      return res.status(403).json({ message: "Forbidden: only buyer can pay" });
+    if (String(bid.requestId) !== String(request._id)) {
+      return res.status(400).json({ message: "Bid does not belong to this request" });
     }
 
     if (!bid.accepted) {
       return res.status(400).json({ message: "Bid is not accepted" });
     }
 
-    const existingReceipt = await Receipt.findOne({
-      bidId: bid._id,
-      status: "paid",
-    });
-
+    // Prevent double-paying
+    const existingReceipt = await Receipt.findOne({ bidId: bid._id, status: "paid" });
     if (existingReceipt) {
       return res.status(200).json({
         message: "Already paid",
@@ -346,117 +271,83 @@ exports.payNow = async (req, res) => {
       });
     }
 
+    // Default card
     const def = await ensureLocalDefaultCard(user);
+    const sourceId = def?.stripeSourceId || "";
 
-    // Read both possible ids
-    let paymentMethodId = def?.stripePaymentMethodId || "";
-    let sourceId = def?.stripeSourceId || "";
-
-    // Safety: if someone stored pm_ inside stripeSourceId, normalize
-    if (!paymentMethodId && sourceId && String(sourceId).startsWith("pm_")) {
-      paymentMethodId = sourceId;
-      sourceId = "";
+    // This is the REAL check now
+    if (!sourceId) {
+      return res.status(400).json({
+        message:
+          "Default card exists in UI, but this user has no Stripe source id saved. Delete old cards and re-add them.",
+      });
     }
 
-    // Safety: if someone stored card_ inside stripePaymentMethodId, normalize
-    if (!sourceId && paymentMethodId && String(paymentMethodId).startsWith("card_")) {
-      sourceId = paymentMethodId;
-      paymentMethodId = "";
-    }
-
-    if (!paymentMethodId && !sourceId) {
-      return res.status(400).json({ message: "No default card set" });
-    }
-
-    const customerId = await ensureStripeCustomer(user, stripe);
-
-    // Amount = bid.totalPrice + 6% fee
-    const subtotal = Number(bid.totalPrice);
-    if (!Number.isFinite(subtotal) || subtotal <= 0) {
+    const total = Number(bid.totalPrice);
+    if (!Number.isFinite(total) || total <= 0) {
       return res.status(400).json({ message: "Invalid bid total price" });
     }
 
-    const merqnetFee = Number((subtotal * 0.06).toFixed(2));
-    const totalToCharge = Number((subtotal + merqnetFee).toFixed(2));
-    const amountCents = Math.round(totalToCharge * 100);
+    const amountCents = Math.round(total * 100);
 
-    let paidId = null;       // PaymentIntent id OR Charge id
-    let usedMethodId = null; // pm_... OR card_...
+    const customerId = await ensureStripeCustomer(user);
 
-    if (paymentMethodId) {
-      // NEW: pm_ via PaymentIntents
-      try {
-        await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
-      } catch (_) {}
-
-      const pi = await stripe.paymentIntents.create({
-        amount: amountCents,
-        currency: "usd",
-        customer: customerId,
-        payment_method: paymentMethodId,
-        confirm: true,
-        off_session: true,
-      });
-
-      if (pi.status !== "succeeded") {
-        return res.status(400).json({ message: "Payment did not succeed" });
-      }
-
-      paidId = pi.id;
-      usedMethodId = paymentMethodId;
-    } else {
-      // LEGACY: card_ via Charges (THIS IS WHAT YOUR DB HAS)
-      const ch = await stripe.charges.create({
-        amount: amountCents,
-        currency: "usd",
-        customer: customerId,
-        source: sourceId,
-        description: `MerqNet payment | request ${request._id} | bid ${bid._id}`,
-        metadata: {
-          requestId: String(request._id),
-          bidId: String(bid._id),
-          buyerId: String(user._id),
-          sellerId: String(bid.sellerId),
-          subtotal: String(subtotal),
-          merqnetFee: String(merqnetFee),
-          totalCharged: String(totalToCharge),
-        },
-      });
-
-      if (ch.status !== "succeeded") {
-        return res.status(400).json({ message: "Payment did not succeed" });
-      }
-
-      paidId = ch.id;
-      usedMethodId = sourceId;
+    try {
+      await setStripeDefaultSource(customerId, sourceId);
+    } catch (e) {
+      console.warn("default_source update failed:", e.message);
     }
 
-    // Keep existing field names so you don't break anything downstream
+    const charge = await stripe.charges.create({
+      amount: amountCents,
+      currency: "usd",
+      customer: customerId,
+      description: `MerqNet payment | request ${requestId} | bid ${bidId}`,
+      metadata: {
+        requestId: String(requestId),
+        bidId: String(bidId),
+        buyerId: String(user._id),
+        sellerId: String(bid.sellerId),
+      },
+    });
+
+    // ✅ Capture card + identifiers for receipt display
+    const cardDetails = charge?.payment_method_details?.card || {};
+    const brand = cardDetails.brand ? String(cardDetails.brand).toUpperCase() : null;
+    const last4 = cardDetails.last4 || null;
+    const expMonth = cardDetails.exp_month ?? null;
+    const expYear = cardDetails.exp_year ?? null;
+    const paymentMethodLabel = brand && last4 ? `${brand} •••• ${last4}` : null;
+
     const receiptDoc = await Receipt.create({
       receiptId: makeReceiptId(),
       requestId: request._id,
       bidId: bid._id,
       buyerId: user._id,
       sellerId: bid.sellerId,
-      amount: totalToCharge,
+      amount: total,
       currency: "usd",
 
-      stripePaymentIntentId: paidId,
-      stripePaymentMethodId: usedMethodId,
+      // Stripe references
+      stripeChargeId: charge.id,
+      stripePaymentIntentId: charge.payment_intent || null,
+      stripePaymentMethodId: charge.payment_method || null,
+
+      // Friendly card display
+      paymentMethod: paymentMethodLabel,
+      cardBrand: brand,
+      cardLast4: last4,
+      cardExpMonth: expMonth,
+      cardExpYear: expYear,
 
       status: "paid",
       viewedByBuyer: true,
       viewedBySeller: false,
     });
 
-    return res.status(200).json({
-      message: "Payment successful",
-      receiptId: receiptDoc.receiptId,
-    });
+    return res.status(200).json({ message: "Payment successful", receiptId: receiptDoc.receiptId });
   } catch (err) {
     console.error("payNow error:", err);
-    return res.status(500).json({
-      message: String(err?.message || "Payment failed"),
-    });
+    return res.status(500).json({ message: "Payment failed" });
   }
 };
