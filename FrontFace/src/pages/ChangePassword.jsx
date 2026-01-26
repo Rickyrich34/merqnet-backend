@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import logopic2 from "../assets/logopic2.png";
 
+const API = import.meta.env.VITE_API_URL;
+
 const ChangePassword = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -19,7 +21,7 @@ const ChangePassword = () => {
     try {
       const userId = localStorage.getItem("userId");
 
-      const res = await fetch(`http://localhost:5000/api/users/change-password/${userId}`, {
+      const res = await fetch(`${API}/api/users/change-password/${userId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -44,7 +46,6 @@ const ChangePassword = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#050017] text-white pt-24 px-5 pb-16">
-
       {/* LOGO */}
       <div className="flex justify-center mb-8">
         <img

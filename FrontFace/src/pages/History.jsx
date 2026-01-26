@@ -3,7 +3,11 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { ChevronLeft } from "lucide-react";
 
-const API = "http://localhost:5000";
+const API = (
+  import.meta?.env?.VITE_API_URL ||
+  import.meta?.env?.VITE_API_BASE_URL ||
+  "https://merqnet-backend-production.up.railway.app"
+).replace(/\/$/, "");
 
 function pickFirst(...vals) {
   for (const v of vals) {
@@ -12,13 +16,28 @@ function pickFirst(...vals) {
   return null;
 }
 
+function formatMoney(amount, currency = "USD") {
+  const num = Number(amount || 0);
+  try {
+    return num.toLocaleString("en-US", { style: "currency", currency });
+  } catch {
+    return `$${num.toFixed(2)}`;
+  }
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
 const History = () => {
   const navigate = useNavigate();
 
   const userId = localStorage.getItem("userId");
   const token = pickFirst(
-    localStorage.getItem("token"),
-    localStorage.getItem("userToken")
+    localStorage.getItem("userToken"),
+    localStorage.getItem("token")
   );
 
   const [buyerHistory, setBuyerHistory] = useState([]);
@@ -91,17 +110,6 @@ const History = () => {
     }
   };
 
-  const formatMoney = (n) => {
-    const num = Number(n || 0);
-    return num.toLocaleString("en-US", { style: "currency", currency: "USD" });
-  };
-
-  const formatDate = (iso) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    return d.toLocaleString();
-  };
-
   const activeList = activeTab === "buyer" ? buyerHistory : sellerHistory;
 
   if (loading) {
@@ -119,9 +127,7 @@ const History = () => {
           Purchase & Sales History
         </h1>
 
-        {/* Back icon + Mark all row */}
         <div className="flex flex-col sm:flex-row justify-center items-center gap-3 mb-6">
-          {/* ✅ Back button ICON ONLY */}
           <button
             onClick={() => navigate("/dashboard")}
             className="w-12 h-12 flex items-center justify-center rounded-xl
@@ -177,26 +183,58 @@ const History = () => {
         ) : (
           <div className="grid gap-4">
             {activeList.map((r) => {
-              const isBuyer = activeTab === "buyer";
-              const viewed = isBuyer ? r.viewedByBuyer : r.viewedBySeller;
+              const isBuyerTab = activeTab === "buyer";
+              const viewed = isBuyerTab ? r.viewedByBuyer : r.viewedBySeller;
               const pill = viewed ? "" : "NEW";
+
+              const currency = r.currency || "USD";
+              const amountText = formatMoney(r.amount, currency);
+
+              const titleLeft = `Receipt ${r.receiptId || r._id || ""}`.trim();
+              const subtitleLeft = r.requestId
+                ? `Request: ${r.requestId}`
+                : r.bidId
+                ? `Bid: ${r.bidId}`
+                : "";
+
+              const cardLine =
+                r.cardBrand && r.cardLast4
+                  ? `${r.cardBrand.toUpperCase()} •••• ${r.cardLast4}${
+                      r.cardExpMonth && r.cardExpYear
+                        ? ` (exp ${String(r.cardExpMonth).padStart(
+                            2,
+                            "0"
+                          )}/${String(r.cardExpYear).slice(-2)})`
+                        : ""
+                    }`
+                  : r.paymentMethodId
+                  ? `Payment method saved`
+                  : "";
 
               return (
                 <button
-                  key={r._id}
-                  onClick={() => navigate(`/receipt/${r.receiptId}`)}
+                  key={r._id || r.receiptId}
+                  onClick={() =>
+                    navigate(`/receipt/${r.receiptId || r._id || ""}`)
+                  }
                   className="text-left w-full p-5 rounded-2xl bg-[#12062b] border border-purple-800/40
                              hover:border-purple-500/70 transition shadow-[0_0_30px_rgba(139,92,246,0.12)]"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-lg font-extrabold text-purple-200">
-                        {r.productName || r?.requestId?.productName || "Product"}
+                        {titleLeft || "Receipt"}
                       </div>
-                      <div className="text-sm text-white/60">
-                        Receipt:{" "}
-                        <span className="text-white/80">{r.receiptId}</span>
-                      </div>
+                      {subtitleLeft ? (
+                        <div className="text-sm text-white/60">
+                          {subtitleLeft}
+                        </div>
+                      ) : null}
+                      {cardLine ? (
+                        <div className="text-xs text-white/55 mt-1">
+                          {cardLine}
+                        </div>
+                      ) : null}
                     </div>
 
                     {pill && (
@@ -210,15 +248,17 @@ const History = () => {
                     <div className="text-white/70">
                       Amount:{" "}
                       <span className="text-emerald-300 font-bold">
-                        {formatMoney(r.finalPrice ?? r.amount)}
+                        {amountText}
                       </span>
                     </div>
+
                     <div className="text-white/70">
                       Status:{" "}
                       <span className="text-white/90 font-semibold">
                         {r.status || "Completed"}
                       </span>
                     </div>
+
                     <div className="text-white/60 col-span-2">
                       Date:{" "}
                       <span className="text-white/80">

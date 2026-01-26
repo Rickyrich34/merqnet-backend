@@ -1,89 +1,154 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { Swords, Trophy } from "lucide-react";
 import logopic2 from "../assets/logopic2.png";
 
 const Home = () => {
   const navigate = useNavigate();
 
-  // ONE CTA ONLY: ENTER
-  // If logged in -> dashboard, else -> login
   const handleEnter = () => {
-    const token = localStorage.getItem("token") || localStorage.getItem("userToken");
+    const token =
+      localStorage.getItem("token") || localStorage.getItem("userToken");
     navigate(token ? "/dashboard" : "/login");
   };
 
   return (
-    <div
-      className="
-        text-white overflow-hidden
-        [min-height:100svh]
-        bg-[#05040b]
-        pt-[calc(5.5rem+env(safe-area-inset-top))]
-        pb-[calc(7.5rem+env(safe-area-inset-bottom))]
-      "
-    >
-      {/* Minimal background */}
+    <div className="min-h-[100dvh] bg-[#05040b] text-white overflow-hidden pt-24 pb-[14rem] sm:pb-24">
+      {/* Background */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-[#05040b]" />
         <div
-          className="absolute inset-0 opacity-90"
+          className="absolute inset-0 opacity-95"
           style={{
             background:
-              "radial-gradient(900px 700px at 45% 18%, rgba(255,80,200,0.10), transparent 60%), radial-gradient(900px 700px at 55% 60%, rgba(0,180,255,0.10), transparent 62%), radial-gradient(900px 700px at 55% 42%, rgba(255,170,0,0.07), transparent 60%)",
+              "radial-gradient(900px 700px at 50% 32%, rgba(255,140,0,0.10), transparent 60%), radial-gradient(900px 700px at 50% 55%, rgba(255,0,200,0.08), transparent 62%), radial-gradient(900px 700px at 50% 62%, rgba(0,200,255,0.08), transparent 64%)",
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/70" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70" />
+        <div className="absolute inset-0 opacity-[0.12] mix-blend-soft-light bg-[repeating-linear-gradient(to_bottom,rgba(255,255,255,0.06)_0px,rgba(255,255,255,0.06)_1px,transparent_3px,transparent_7px)]" />
+        <div className="absolute inset-0 opacity-[0.07] bg-[radial-gradient(rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:6px_6px]" />
       </div>
 
-      <main className="max-w-xl mx-auto px-4">
-        {/* Use flex + 100svh so ENTER is visible without scroll on mobile */}
-        <section className="min-h-[calc(100svh-13rem)] flex items-center justify-center">
-          <div className="w-full text-center">
-            {/* MERQNET title */}
-            <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight">
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-white to-orange-400">
-                MERQ
-              </span>
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-300 via-orange-400 to-orange-500">
-                NET
-              </span>
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-120%); opacity: 0; }
+          20% { opacity: 1; }
+          50% { opacity: 1; }
+          80% { opacity: 1; }
+          100% { transform: translateX(120%); opacity: 0; }
+        }
+        @keyframes floaty {
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-6px); }
+          100% { transform: translateY(0px); }
+        }
+        @keyframes pulseGlow {
+          0% { filter: drop-shadow(0 0 14px rgba(34,211,238,0.20)); }
+          50% { filter: drop-shadow(0 0 22px rgba(34,211,238,0.38)); }
+          100% { filter: drop-shadow(0 0 14px rgba(34,211,238,0.20)); }
+        }
+      `}</style>
+
+      <main className="max-w-4xl mx-auto px-4">
+        <section className="pt-6 pb-10">
+          <div className="w-full text-center flex flex-col items-center">
+            {/* TITLE */}
+            <h1
+              className="
+                text-5xl sm:text-7xl font-black tracking-tight
+                bg-gradient-to-r from-yellow-200 via-amber-400 to-orange-500
+                bg-clip-text text-transparent
+                drop-shadow-[0_6px_30px_rgba(0,0,0,0.65)]
+              "
+            >
+              MerqNet
             </h1>
 
-            <p className="mt-2 text-sm sm:text-base text-white/75">
-              The buyer is in control.
-            </p>
+            {/* Tagline */}
+            <div className="mt-4 flex justify-center w-full">
+              <div className="relative inline-flex items-center justify-center px-5 py-2 rounded-full border border-white/12 bg-white/[0.04] backdrop-blur shadow-[0_18px_55px_rgba(0,0,0,0.65)] overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 w-1/2 opacity-60"
+                  style={{
+                    animation: "shimmer 2.8s ease-in-out infinite",
+                    background:
+                      "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), rgba(34,211,238,0.14), transparent)",
+                  }}
+                />
+                <span className="relative text-[11px] sm:text-sm font-black tracking-[0.22em] uppercase text-white/95">
+                  <span className="text-cyan-200">The buyer</span> is in control.
+                </span>
+              </div>
+            </div>
 
-            {/* BIG dog/logo - scale down on mobile so the CTA stays visible */}
-            <div className="mt-4 flex justify-center">
+            {/* Dog */}
+            <div className="mt-2 flex justify-center w-full">
               <div className="relative w-[280px] sm:w-[430px] max-w-full">
-                <div className="absolute -inset-10 rounded-full blur-3xl opacity-55 bg-gradient-to-r from-fuchsia-500/25 via-orange-400/20 to-cyan-400/20" />
+                {/* CONTROL YOUR GAME — anchored to the dog container (no layout shift) */}
+                <div className="absolute top-[18%] left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+                  <span
+                    className="
+                      text-cyan-200/70
+                      text-sm sm:text-base
+                      font-extrabold
+                      tracking-[0.45em]
+                      uppercase
+                      select-none
+                      whitespace-nowrap
+                    "
+                    style={{ textShadow: "0 0 20px rgba(34,211,238,0.45)" }}
+                  >
+                    CONTROL&nbsp;YOUR&nbsp;GAME
+                  </span>
+                </div>
+
+                <div
+                  className="absolute -inset-16 rounded-full blur-3xl opacity-35"
+                  style={{
+                    background:
+                      "radial-gradient(circle at 50% 50%, rgba(255,180,60,0.18), rgba(255,0,200,0.10), rgba(0,200,255,0.10), transparent 70%)",
+                  }}
+                />
                 <img
                   src={logopic2}
-                  alt="MerqNet neon dog"
+                  alt="MerqNet"
                   className="relative w-full h-auto select-none"
                   draggable="false"
+                  style={{ animation: "floaty 4.2s ease-in-out infinite" }}
                 />
               </div>
             </div>
 
-            {/* 3-step line */}
-            <p className="mt-3 text-sm sm:text-base font-semibold text-white/85">
-              Request <span className="text-white/40">—</span> Vendors compete{" "}
-              <span className="text-white/40">—</span> You save
-            </p>
-
-            {/* Single CTA */}
-            <div className="mt-6 flex justify-center">
+            {/* CTA */}
+            <div className="-mt-8 sm:mt-4 flex justify-center w-full">
               <button
                 onClick={handleEnter}
-                className="relative w-[260px] rounded-xl px-10 py-3 font-extrabold tracking-wide
-                           border border-cyan-200/55 bg-cyan-400/10
-                           shadow-[0_0_30px_rgba(34,211,238,0.22)]
-                           hover:border-cyan-200/75 hover:bg-cyan-400/15 hover:shadow-[0_0_38px_rgba(34,211,238,0.28)]
-                           transition"
+                className="relative w-[260px] rounded-xl px-10 py-3 font-extrabold tracking-[0.20em] uppercase border border-cyan-200/55 bg-cyan-400/10 shadow-[0_0_30px_rgba(34,211,238,0.22)] hover:border-cyan-200/75 hover:bg-cyan-400/15 transition"
+                style={{ animation: "pulseGlow 2.6s ease-in-out infinite" }}
               >
                 ENTER
               </button>
+            </div>
+
+            {/* Mission */}
+            <div className="mt-6 flex justify-center w-full">
+              <div className="relative inline-flex items-center justify-center px-5 py-2 rounded-full border border-white/12 bg-white/[0.04] backdrop-blur shadow-[0_18px_55px_rgba(0,0,0,0.65)] overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 w-1/2 opacity-60"
+                  style={{
+                    animation: "shimmer 2.8s ease-in-out infinite",
+                    background:
+                      "linear-gradient(90deg, transparent, rgba(255,255,255,0.18), rgba(34,211,238,0.14), transparent)",
+                  }}
+                />
+                <span className="relative inline-flex items-center gap-2 whitespace-nowrap text-[11px] sm:text-sm font-black tracking-[0.22em] uppercase text-white/95">
+                  <Swords className="w-4 h-4 text-fuchsia-200" />
+                  <span className="text-cyan-200">Vendors compete</span>
+                  <span className="text-white/35">—</span>
+                  <Trophy className="w-4 h-4 text-amber-300" />
+                  <span className="text-amber-300">You win</span>
+                </span>
+              </div>
             </div>
           </div>
         </section>

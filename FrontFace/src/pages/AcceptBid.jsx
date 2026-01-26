@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 
-const API = "http://localhost:5000";
+const API = import.meta.env.VITE_API_URL;
 
 function getToken() {
   return localStorage.getItem("userToken") || localStorage.getItem("token") || "";
@@ -111,7 +111,7 @@ export default function AcceptBid() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white px-6 pt-28 pb-20">
+    <div className="min-h-screen bg-black text-white px-6 pt-[160px] pb-20">
       <button
         onClick={() => navigate(-1)}
         className="rounded-xl border border-white/15 bg-[#0b0a1c]/70 hover:bg-[#0b0a1c]/85 transition p-2 backdrop-blur-md text-white/80 hover:text-white"

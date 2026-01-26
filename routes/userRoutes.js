@@ -1,3 +1,4 @@
+// backend/routes/userRoutes.js
 const express = require("express");
 const router = express.Router();
 
@@ -8,16 +9,14 @@ const {
   updateProfile,
 } = require("../controllers/userController");
 
-// ✅ REGISTER
-router.post("/register", registerUser);
+const { protect } = require("../middleware/authMiddleware");
 
-// ✅ LOGIN
+// Public
+router.post("/register", registerUser);
 router.post("/login", loginUser);
 
-// ✅ GET PROFILE (PROTECTED)
-router.get("/profile/:id", getProfile);
-
-// ✅ UPDATE PROFILE (PROTECTED)
-router.put("/profile/:id", updateProfile);
+// Protected (frontend already sends Bearer token)
+router.get("/profile/:id", protect, getProfile);
+router.put("/profile/:id", protect, updateProfile);
 
 module.exports = router;

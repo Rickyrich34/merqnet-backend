@@ -2,12 +2,29 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-const EditProfile = () => {
+/* ================================
+   Robust API resolver (production safe)
+================================== */
+const ENV_API =
+  (typeof import.meta !== "undefined" &&
+    import.meta.env &&
+    (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL)) ||
+  "";
+
+const API =
+  ENV_API && ENV_API.startsWith("http")
+    ? ENV_API.replace(/\/$/, "")
+    : "https://merqnet-backend-production.up.railway.app";
+
+export default function EditProfile() {
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
+
+  const token =
+    localStorage.getItem("userToken") || localStorage.getItem("token");
   const userId = localStorage.getItem("userId");
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const [formData, setFormData] = useState({
     fullName: "",
@@ -17,25 +34,18 @@ const EditProfile = () => {
     shippingAddresses: [],
   });
 
-  const [editing, setEditing] = useState({
-    fullName: false,
-    email: false,
-    phone: false,
-  });
-
   useEffect(() => {
-    if (!token || !userId) return;
+    if (!token || !userId) {
+      setLoading(false);
+      navigate("/login");
+      return;
+    }
 
     const fetchUser = async () => {
       try {
-        const res = await axios.get(
-          `http://localhost:5000/api/users/profile/${userId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        const res = await axios.get(`${API}/api/users/profile/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
         const user = res.data;
 
@@ -43,23 +53,19 @@ const EditProfile = () => {
           fullName: user.fullName || "",
           email: user.email || "",
           phone: user.phone || "",
-          acceptsInternationalTrade: user.acceptsInternationalTrade || false,
+          acceptsInternationalTrade: !!user.acceptsInternationalTrade,
           shippingAddresses: user.shippingAddresses || [],
         });
-
-        setLoading(false);
-      } catch (error) {
-        console.error("Error cargando perfil:", error);
+      } catch (err) {
+        console.error("EditProfile load error:", err);
+        setError("Failed to load profile.");
+      } finally {
         setLoading(false);
       }
     };
 
     fetchUser();
-  }, [token, userId]);
-
-  const toggleEdit = (field) => {
-    setEditing((prev) => ({ ...prev, [field]: !prev[field] }));
-  };
+  }, [token, userId, navigate]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -69,272 +75,242 @@ const EditProfile = () => {
     }));
   };
 
-  const handleAddressChange = (id, field, value) => {
+  const handleAddressChange = (index, e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => {
+      const updated = [...prev.shippingAddresses];
+      updated[index] = { ...updated[index], [name]: value };
+      return { ...prev, shippingAddresses: updated };
+    });
+  };
+
+  const setDefaultAddress = (index) => {
     setFormData((prev) => ({
       ...prev,
-      shippingAddresses: prev.shippingAddresses.map((addr) =>
-        addr._id === id ? { ...addr, [field]: value } : addr
-      ),
+      shippingAddresses: prev.shippingAddresses.map((a, i) => ({
+        ...a,
+        isDefault: i === index,
+      })),
     }));
   };
 
   const addAddress = () => {
     if (formData.shippingAddresses.length >= 3) return;
 
-    const newAddress = {
-      _id: `temp-${Date.now()}`,
-      streetAddress: "",
-      city: "",
-      state: "",
-      country: "",
-      postalCode: "",
-      isDefault: formData.shippingAddresses.length === 0,
-    };
-
     setFormData((prev) => ({
       ...prev,
-      shippingAddresses: [...prev.shippingAddresses, newAddress],
+      shippingAddresses: [
+        ...prev.shippingAddresses,
+        {
+          streetAddress: "",
+          city: "",
+          state: "",
+          country: "",
+          postalCode: "",
+          isDefault: false,
+        },
+      ],
     }));
   };
 
-  const setDefaultAddress = (id) => {
-    setFormData((prev) => ({
-      ...prev,
-      shippingAddresses: prev.shippingAddresses.map((addr) => ({
-        ...addr,
-        isDefault: addr._id === id,
+  const normalizePayload = (payload) => {
+    const hasDefault = payload.shippingAddresses.some((a) => a.isDefault);
+    return {
+      ...payload,
+      shippingAddresses: payload.shippingAddresses.map((a, idx) => ({
+        ...a,
+        isDefault: hasDefault ? a.isDefault : idx === 0,
       })),
-    }));
+    };
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
     try {
-      // 🔥 FIX ABSOLUTO DEL ERROR 500 🔥
-      const cleanAddresses = formData.shippingAddresses.map((addr) => {
-        const copy = { ...addr };
-        if (copy._id && copy._id.startsWith("temp-")) {
-          delete copy._id; // Mongo genera uno nuevo SIN CRASHEAR
-        }
-        return copy;
-      });
-
-      const cleanPayload = {
-        ...formData,
-        shippingAddresses: cleanAddresses,
-      };
-
       await axios.put(
-        `http://localhost:5000/api/users/profile/${userId}`,
-        cleanPayload,
+        `${API}/api/users/profile/${userId}`,
+        normalizePayload(formData),
         {
           headers: {
             Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
           },
         }
       );
 
       navigate("/profile");
-    } catch (error) {
-      console.error("Error guardando cambios:", error);
+    } catch (err) {
+      console.error("EditProfile save error:", err);
+      setError(err?.response?.data?.message || "Failed to update profile.");
     }
   };
 
-  const renderField = (label, fieldName, type = "text") => (
-    <div className="mb-6">
-      <label className="text-purple-300 flex justify-between items-center mb-1">
-        {label}
-        <button
-          type="button"
-          onClick={() => toggleEdit(fieldName)}
-          className="text-sm bg-purple-700 px-3 py-1 rounded hover:bg-purple-600"
-        >
-          {editing[fieldName] ? "Listo" : "Editar"}
-        </button>
-      </label>
-      <input
-        type={type}
-        name={fieldName}
-        value={formData[fieldName]}
-        disabled={!editing[fieldName]}
-        onChange={handleChange}
-        className={`w-full p-3 rounded bg-black/40 border border-purple-700 ${
-          editing[fieldName]
-            ? "opacity-100"
-            : "opacity-60 cursor-not-allowed"
-        }`}
-      />
-    </div>
-  );
-
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-white bg-black">
-        Cargando...
+      <div className="min-h-screen flex items-center justify-center bg-black text-white">
+        Loading profile…
       </div>
     );
   }
 
-  return (
-    <div
-      className="min-h-screen pt-24 px-6 pb-40 text-white flex justify-center"
-      style={{
-        background:
-          "linear-gradient(135deg, #0a0122 0%, #120034 50%, #1a0060 100%)",
-      }}
-    >
-      <div className="max-w-2xl w-full bg-black/40 backdrop-blur-xl p-10 rounded-2xl shadow-[0_0_30px_#9900ff] border border-purple-700 relative">
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-black text-white gap-4">
+        <p>{error}</p>
+        <button
+          onClick={() => navigate("/dashboard")}
+          className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 transition"
+        >
+          Back
+        </button>
+      </div>
+    );
+  }
 
+  const baseBtn =
+    "relative inline-flex items-center justify-center select-none rounded-xl font-extrabold tracking-wide transition active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-cyan-400/60";
+
+  const btnPrimary =
+    baseBtn +
+    " w-full py-3 text-white bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-600 hover:from-fuchsia-500 hover:via-purple-500 hover:to-indigo-500 shadow-[0_10px_30px_rgba(168,85,247,0.25)]";
+
+  const btnCyan =
+    baseBtn +
+    " w-full py-3 text-white bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 shadow-[0_10px_30px_rgba(34,211,238,0.25)]";
+
+  const btnGhost =
+    baseBtn +
+    " w-full py-3 text-white/90 bg-white/5 hover:bg-white/10 border border-white/10";
+
+  return (
+    <div className="min-h-screen pt-24 pb-32 px-4 text-white bg-black flex justify-center">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-xl bg-black/70 p-8 rounded-2xl shadow-xl space-y-6"
+      >
+        {/* Back arrow icon only */}
         <button
           type="button"
           onClick={() => navigate("/profile")}
-          className="absolute top-4 left-4 px-4 py-2 bg-purple-900/80 hover:bg-purple-700 text-white font-bold rounded-lg shadow-[0_0_12px_#ff00ff] transition"
+          aria-label="Back"
+          className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-full
+                     bg-white/5 border border-white/10 text-white
+                     hover:bg-white/10 hover:border-white/20 transition
+                     shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_10px_25px_rgba(0,0,0,0.55)]
+                     active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
         >
-          ← Volver
+          <span className="text-xl leading-none">‹</span>
         </button>
 
-        <h1 className="text-3xl font-bold text-center mb-8 text-purple-300 drop-shadow-[0_0_10px_#9d00ff]">
-          Editar Perfil
-        </h1>
+        <h1 className="text-3xl font-black mb-2">Edit Profile</h1>
 
-        {renderField("Nombre completo", "fullName")}
-        {renderField("Correo electrónico", "email", "email")}
-        {renderField("Teléfono (+ prefijo)", "phone")}
+        <input
+          name="fullName"
+          value={formData.fullName}
+          onChange={handleChange}
+          placeholder="Full name"
+          className="w-full p-3 rounded-lg bg-[#111] border border-white/10"
+        />
 
-        <div className="mt-6 mb-10">
-          <label className="flex items-center gap-3 text-purple-300">
-            <input
-              type="checkbox"
-              name="acceptsInternationalTrade"
-              checked={formData.acceptsInternationalTrade}
-              onChange={handleChange}
-            />
-            Disponible para intercambio internacional
-          </label>
+        <input
+          name="email"
+          value={formData.email}
+          onChange={handleChange}
+          placeholder="Email"
+          className="w-full p-3 rounded-lg bg-[#111] border border-white/10"
+        />
+
+        <input
+          name="phone"
+          value={formData.phone}
+          onChange={handleChange}
+          placeholder="Phone"
+          className="w-full p-3 rounded-lg bg-[#111] border border-white/10"
+        />
+
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="acceptsInternationalTrade"
+            checked={formData.acceptsInternationalTrade}
+            onChange={handleChange}
+            className="accent-cyan-400"
+          />
+          Accept international trade
+        </label>
+
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-bold">Shipping addresses</h2>
+            {formData.shippingAddresses.length < 3 && (
+              <button
+                type="button"
+                onClick={addAddress}
+                className="text-cyan-300 hover:text-cyan-200 text-sm font-bold"
+              >
+                + Add
+              </button>
+            )}
+          </div>
+
+          {formData.shippingAddresses.map((addr, i) => (
+            <div
+              key={i}
+              className="rounded-xl p-4 space-y-2 bg-white/[0.03] border border-white/10"
+            >
+              <div className="flex justify-between items-center">
+                <strong>Address {i + 1}</strong>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    checked={!!addr.isDefault}
+                    onChange={() => setDefaultAddress(i)}
+                    className="accent-cyan-400"
+                  />
+                  Default
+                </label>
+              </div>
+
+              {["streetAddress", "city", "state", "country", "postalCode"].map(
+                (field) => (
+                  <input
+                    key={field}
+                    name={field}
+                    value={addr[field] || ""}
+                    onChange={(e) => handleAddressChange(i, e)}
+                    placeholder={field}
+                    className="w-full p-2.5 rounded-lg bg-[#111] border border-white/10"
+                  />
+                )
+              )}
+            </div>
+          ))}
         </div>
 
-        <h2 className="text-2xl font-semibold text-purple-400 mb-3">
-          Direcciones de Envío
-        </h2>
-
-        {formData.shippingAddresses.map((addr) => (
-          <div
-            key={addr._id}
-            className="bg-purple-900/30 p-5 rounded-xl border border-purple-700 shadow-[0_0_15px_#7c00ff] mb-5"
-          >
-            <div className="mb-3">
-              <label className="text-purple-300">Calle</label>
-              <input
-                type="text"
-                className="w-full p-2 rounded bg-black/40 border border-purple-700"
-                value={addr.streetAddress}
-                onChange={(e) =>
-                  handleAddressChange(addr._id, "streetAddress", e.target.value)
-                }
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="text-purple-300">Ciudad / Pueblo</label>
-              <input
-                type="text"
-                className="w-full p-2 rounded bg-black/40 border border-purple-700"
-                value={addr.city}
-                onChange={(e) =>
-                  handleAddressChange(addr._id, "city", e.target.value)
-                }
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="text-purple-300">Estado / Provincia</label>
-              <input
-                type="text"
-                className="w-full p-2 rounded bg-black/40 border border-purple-700"
-                value={addr.state}
-                onChange={(e) =>
-                  handleAddressChange(addr._id, "state", e.target.value)
-                }
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="text-purple-300">País</label>
-              <input
-                type="text"
-                className="w-full p-2 rounded bg-black/40 border border-purple-700"
-                value={addr.country}
-                onChange={(e) =>
-                  handleAddressChange(addr._id, "country", e.target.value)
-                }
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="text-purple-300">Código Postal</label>
-              <input
-                type="text"
-                className="w-full p-2 rounded bg-black/40 border border-purple-700"
-                value={addr.postalCode}
-                onChange={(e) =>
-                  handleAddressChange(addr._id, "postalCode", e.target.value)
-                }
-              />
-            </div>
-
-            <label className="flex items-center gap-2 mt-2 text-purple-300">
-              <input
-                type="radio"
-                checked={addr.isDefault}
-                onChange={() => setDefaultAddress(addr._id)}
-              />
-              Dirección Predeterminada
-            </label>
-          </div>
-        ))}
-
         <button
           type="button"
-          onClick={addAddress}
-          className="bg-purple-700 hover:bg-purple-600 transition px-5 py-2 rounded-lg text-white font-semibold mt-2 disabled:opacity-40"
-          disabled={formData.shippingAddresses.length >= 3}
+          onClick={() => navigate("/paymentmethods")}
+          className={btnCyan}
         >
-          Añadir Dirección
+          Manage Payment Methods
         </button>
 
-        <h2 className="text-2xl font-semibold text-purple-400 mt-10 mb-3">
-          Cambio de Contraseña
-        </h2>
-        <button
-          type="button"
-          onClick={() => navigate("/changepassword")}
-          className="bg-blue-700 hover:bg-blue-600 transition px-5 py-2 rounded-lg text-white font-semibold"
-        >
-          Cambiar Contraseña
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <button type="submit" className={btnPrimary}>
+            Save changes
+          </button>
 
-        <h2 className="text-2xl font-semibold text-purple-400 mt-10 mb-3">
-          Métodos de Pago
-        </h2>
-        <button
-          type="button"
-          onClick={() => navigate("/payment-methods")}
-          className="bg-green-700 hover:bg-green-600 transition px-5 py-2 rounded-lg text-white font-semibold"
-        >
-          Gestionar Métodos de Pago
-        </button>
-
-        <div className="flex justify-end mt-10">
           <button
             type="button"
-            onClick={handleSubmit}
-            className="px-6 py-3 rounded-lg font-bold text-white bg-red-700 shadow-[0_0_12px_#ff004c] hover:bg-red-600"
+            onClick={() => navigate("/profile")}
+            className={btnGhost}
           >
-            Guardar Cambios
+            Cancel
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
-};
-
-export default EditProfile;
+}

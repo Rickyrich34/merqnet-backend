@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
+const API = import.meta.env.VITE_API_URL;
+
 export default function AnswerBack() {
   const navigate = useNavigate();
   const { requestId, buyerId } = useParams();
@@ -20,7 +22,7 @@ export default function AnswerBack() {
     };
 
     try {
-      const res = await fetch("http://localhost:5000/api/messages/send", {
+      const res = await fetch(`${API}/api/messages/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(messageData),
@@ -38,14 +40,17 @@ export default function AnswerBack() {
 
   return (
     <div className="min-h-screen bg-[#080019] pt-32 px-4 text-white">
-      <h1 className="text-center text-5xl font-bold text-purple-400 mb-12 tracking-wide 
-                     drop-shadow-[0_0_15px_rgba(168,85,247,0.7)]">
+      <h1
+        className="text-center text-5xl font-bold text-purple-400 mb-12 tracking-wide 
+                     drop-shadow-[0_0_15px_rgba(168,85,247,0.7)]"
+      >
         Reply to Buyer
       </h1>
 
-      <div className="max-w-3xl mx-auto bg-[#021024] p-10 rounded-2xl border border-purple-700/40 
-                      shadow-lg shadow-purple-900/40">
-        
+      <div
+        className="max-w-3xl mx-auto bg-[#021024] p-10 rounded-2xl border border-purple-700/40 
+                      shadow-lg shadow-purple-900/40"
+      >
         <p className="text-lg text-gray-300 mb-6 text-center">
           You are replying to the buyer for this request:
         </p>

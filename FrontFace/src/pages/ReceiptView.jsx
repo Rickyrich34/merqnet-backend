@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import RatingModal from "../components/RatingModal";
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 function getToken() {
   return (
@@ -26,6 +26,12 @@ function pickId(val) {
 function toNumber(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function formatMoney(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return "N/A";
+  return x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
@@ -69,6 +75,25 @@ function resolveAmount(receipt) {
   }
 
   return null;
+}
+
+/**
+ * ✅ MerqNet breakdown:
+ * If amountValue is the TOTAL CHARGED (already includes 6%),
+ * subtotal = total / 1.06
+ * fee = total - subtotal
+ * Rounded to 2 decimals.
+ */
+function merqnetBreakdownFromTotal(total) {
+  const t = toNumber(total);
+  if (t == null) return null;
+
+  const subtotalRaw = t / 1.06;
+  const subtotal = Number(subtotalRaw.toFixed(2));
+  const fee = Number((t - subtotal).toFixed(2));
+  const totalCharged = Number(t.toFixed(2));
+
+  return { subtotal, fee, totalCharged };
 }
 
 /**
@@ -173,6 +198,9 @@ export default function ReceiptView() {
         maximumFractionDigits: 2,
       })
     : "N/A";
+
+  // ✅ Breakdown (Subtotal / Fee / Total)
+  const breakdown = useMemo(() => merqnetBreakdownFromTotal(amountValue), [amountValue]);
 
   const formattedDate = receipt?.createdAt
     ? new Date(receipt.createdAt).toLocaleString("en-US", {
@@ -406,6 +434,34 @@ export default function ReceiptView() {
             ) : null}
           </div>
         </div>
+
+        {/* ✅ MerqNet Breakdown */}
+        {breakdown && (
+          <div className="bg-white/10 rounded-xl px-4 py-3 mb-6">
+            <div className="text-xs text-white/60 mb-2">Breakdown</div>
+
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-white/70">Subtotal</span>
+              <span className="font-semibold">
+                {currencyCode} {formatMoney(breakdown.subtotal)}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-sm mt-2">
+              <span className="text-white/70">MerqNet Fee (6%)</span>
+              <span className="font-semibold text-fuchsia-200">
+                {currencyCode} {formatMoney(breakdown.fee)}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-sm mt-2">
+              <span className="text-white/70">Total Charged</span>
+              <span className="font-bold text-emerald-200">
+                {currencyCode} {formatMoney(breakdown.totalCharged)}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-5 text-sm">
           <div>

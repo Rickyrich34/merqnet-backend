@@ -11,11 +11,13 @@ import {
   Trophy,
   TrendingDown,
   Minus,
+  Ban,
 } from "lucide-react";
 
 import Galactic1 from "../assets/Galactic1.png";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+// ✅ Keep your env fallback (works on Railway + local)
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
 const CATEGORY_OPTIONS = [
   "All Categories",
@@ -37,9 +39,6 @@ const CATEGORY_OPTIONS = [
 function formatShipping(addr) {
   if (!addr) return null;
 
-  // Support both shapes:
-  // shippingAddress: { street, city, state, country, postalCode }
-  // or shippingAddress: { streetAddress, city, state, country, postalCode }
   const street = addr.street || addr.streetAddress || "";
   const city = addr.city || "";
   const state = addr.state || "";
@@ -71,16 +70,65 @@ function safeNumber(n) {
 
 function formatMoney(n) {
   const x = Number(n);
-  if (!Number.isFinite(x)) return "—";
+  if (!Number.isFinite(x) || x <= 0) return "—";
   return `$${x.toLocaleString("en-US")}`;
 }
+
+// ✅ Defensive “closed request” detector (works even if backend uses different field names)
+function isRequestClosed(req) {
+  if (!req || typeof req !== "object") return false;
+
+  const status = String(req.status || req.requestStatus || req.state || "").toLowerCase();
+
+  if (
+    status.includes("closed") ||
+    status.includes("completed") ||
+    status.includes("complete") ||
+    status.includes("accepted") ||
+    status.includes("awarded") ||
+    status.includes("winner") ||
+    status.includes("paid") ||
+    status.includes("fulfilled") ||
+    status.includes("done")
+  ) {
+    return true;
+  }
+
+  if (req.isClosed === true || req.closed === true || req.isComplete === true || req.completed === true) {
+    return true;
+  }
+
+  if (
+    req.acceptedBidId ||
+    req.acceptedBid ||
+    req.winningBidId ||
+    req.winningBid ||
+    req.selectedBidId ||
+    req.selectedBid ||
+    req.chosenBidId ||
+    req.chosenBid ||
+    req.winnerBidId ||
+    req.winnerBid ||
+    req.paymentIntentId ||
+    req.receiptId
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+// ✅ Axios instance with timeout so requests won't hang forever
+const http = axios.create({
+  timeout: 12000,
+});
 
 const SellerDashboard = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState("All Categories");
 
-  // requestId -> { bestPrice, myPrice, status, bestSellerEmail }
+  // requestId -> { bestPrice, myPrice, status }
   const [offerMap, setOfferMap] = useState({});
   const [offersLoading, setOffersLoading] = useState(false);
 
@@ -104,7 +152,7 @@ const SellerDashboard = () => {
           ? `${API}/filtered/${userId}`
           : `${API}/filtered/${userId}?category=${encodeURIComponent(selectedCategory)}`;
 
-        const res = await axios.get(url);
+        const res = await http.get(url);
         setRequests(res.data.requests || []);
       } catch (error) {
         console.error("Error loading seller dashboard:", error);
@@ -117,75 +165,86 @@ const SellerDashboard = () => {
     load();
   }, [userId, selectedCategory, API]);
 
+  // ✅ IMPORTANT: Filter out CLOSED requests so they do NOT show up
   const visibleRequests = useMemo(() => {
-    return (requests || []).filter((req) => req?.clientID?._id !== userId);
+    return (requests || [])
+      .filter((req) => req?.clientID?._id !== userId)
+      .filter((req) => !isRequestClosed(req));
   }, [requests, userId]);
 
   const matchingCount = visibleRequests.length;
 
-  // Load best offer + my offer per request (seller competition UI)
+  // ✅ CRITICAL FIX: DO NOT SPAM backend with Promise.all() to /bids/request/:id
+  // Run sequentially so Railway doesn't time out.
   useEffect(() => {
+    let cancelled = false;
+
     const loadOffers = async () => {
       try {
         if (!userId || visibleRequests.length === 0) {
-          setOfferMap({});
+          if (!cancelled) setOfferMap({});
           return;
         }
 
-        setOffersLoading(true);
+        if (!cancelled) setOffersLoading(true);
 
-        const results = await Promise.all(
-          visibleRequests.map(async (r) => {
-            try {
-              const res = await axios.get(`${API_BASE_URL}/api/bids/request/${r._id}`, {
-                headers: authHeaders(),
-              });
-              const bids = Array.isArray(res.data) ? res.data : [];
+        const map = {};
 
-              // best = lowest totalPrice
-              const withPrice = bids
-                .map((b) => ({ b, price: safeNumber(b?.totalPrice) }))
-                .filter((x) => x.price > 0);
+        for (const r of visibleRequests) {
+          if (cancelled) return;
 
-              const best = withPrice.sort((a, b) => a.price - b.price)[0] || null;
-              const myBids = bids
-                .filter((b) => String(b?.sellerId?._id || b?.sellerId) === String(userId))
-                .sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0));
+          // If somehow closed slips in, mark ended
+          if (isRequestClosed(r)) {
+            map[String(r._id)] = { bestPrice: 0, myPrice: 0, status: "ENDED" };
+            continue;
+          }
 
-              const myLatest = myBids[0] || null;
+          try {
+            const res = await http.get(`${API_BASE_URL}/api/bids/request/${r._id}`, {
+              headers: authHeaders(),
+            });
 
-              const bestPrice = best ? best.price : 0;
-              const myPrice = myLatest ? safeNumber(myLatest?.totalPrice) : 0;
-              const bestSellerEmail = best?.b?.sellerId?.email || "";
+            const bids = Array.isArray(res.data) ? res.data : [];
 
-              let status = "NO_OFFER";
-              if (bestPrice > 0 && myPrice > 0) {
-                status = bestPrice === myPrice ? "WINNING" : "OUTBID";
-              } else if (myPrice > 0) {
-                status = "WINNING"; // only offer so far
-              } else if (bestPrice > 0) {
-                status = "NO_OFFER";
-              }
+            // best = lowest totalPrice
+            const withPrice = bids
+              .map((b) => ({ b, price: safeNumber(b?.totalPrice) }))
+              .filter((x) => x.price > 0);
 
-              return [String(r._id), { bestPrice, myPrice, status, bestSellerEmail }];
-            } catch {
-              return [String(r._id), { bestPrice: 0, myPrice: 0, status: "NO_OFFER", bestSellerEmail: "" }];
-            }
-          })
-        );
+            const best = withPrice.sort((a, b) => a.price - b.price)[0] || null;
 
-        const map = results.reduce((acc, [k, v]) => {
-          acc[k] = v;
-          return acc;
-        }, {});
+            const myBids = bids
+              .filter((b) => String(b?.sellerId?._id || b?.sellerId) === String(userId))
+              .sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0));
 
-        setOfferMap(map);
+            const myLatest = myBids[0] || null;
+
+            const bestPrice = best ? best.price : 0;
+            const myPrice = myLatest ? safeNumber(myLatest?.totalPrice) : 0;
+
+            let status = "NO_OFFER";
+            if (bestPrice > 0 && myPrice > 0) status = bestPrice === myPrice ? "WINNING" : "OUTBID";
+            else if (myPrice > 0) status = "WINNING";
+
+            map[String(r._id)] = { bestPrice, myPrice, status };
+          } catch (e) {
+            console.error("Offer load failed for request:", r?._id, e?.message || e);
+            // Don’t hang UI: mark as NO_OFFER if bids fetch fails
+            map[String(r._id)] = { bestPrice: 0, myPrice: 0, status: "NO_OFFER" };
+          }
+        }
+
+        if (!cancelled) setOfferMap(map);
       } finally {
-        setOffersLoading(false);
+        if (!cancelled) setOffersLoading(false);
       }
     };
 
     loadOffers();
+
+    return () => {
+      cancelled = true;
+    };
   }, [userId, visibleRequests]);
 
   if (loading) return <p className="text-white pt-44">Loading...</p>;
@@ -213,7 +272,6 @@ const SellerDashboard = () => {
         />
       </div>
 
-      {/* Safe for fixed navbar */}
       <div className="relative z-10 max-w-xl mx-auto px-5 pt-44 pb-28">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -240,9 +298,7 @@ const SellerDashboard = () => {
               <div className="font-semibold tracking-wide text-white/90">MerqNet</div>
             </div>
 
-            <h1 className="mt-2 text-[22px] font-semibold text-white/95">
-              Seller Dashboard
-            </h1>
+            <h1 className="mt-2 text-[22px] font-semibold text-white/95">Seller Dashboard</h1>
 
             <div className="mt-2 inline-flex items-center gap-2 text-[11px] px-3 py-1 rounded-full border border-amber-400/25 bg-[#0B001F]/75 text-white/75">
               <span className="inline-block w-2 h-2 rounded-full bg-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.7)]" />
@@ -254,17 +310,7 @@ const SellerDashboard = () => {
         </div>
 
         {/* Category filter */}
-        <div
-          className="
-            mt-6
-            rounded-3xl
-            border border-cyan-400/20
-            bg-[#0B001F]/82
-            p-5
-            backdrop-blur-md
-            shadow-[0_0_30px_rgba(34,211,238,0.10)]
-          "
-        >
+        <div className="mt-6 rounded-3xl border border-cyan-400/20 bg-[#0B001F]/82 p-5 backdrop-blur-md shadow-[0_0_30px_rgba(34,211,238,0.10)]">
           <div className="flex items-center gap-2 text-xs text-white/80">
             <Filter className="w-4 h-4 text-cyan-200" />
             <span className="font-semibold">Category Filter</span>
@@ -300,28 +346,12 @@ const SellerDashboard = () => {
 
         {/* Stats */}
         <div className="mt-6 grid grid-cols-2 gap-4">
-          <div
-            className="
-              rounded-3xl
-              border border-cyan-400/25
-              bg-[#0B001F]/82
-              p-5
-              shadow-[0_0_28px_rgba(34,211,238,0.12)]
-            "
-          >
+          <div className="rounded-3xl border border-cyan-400/25 bg-[#0B001F]/82 p-5 shadow-[0_0_28px_rgba(34,211,238,0.12)]">
             <p className="text-xs text-white/70">Matching Requests</p>
             <span className="text-3xl font-bold text-cyan-200">{matchingCount}</span>
           </div>
 
-          <div
-            className="
-              rounded-3xl
-              border border-amber-400/25
-              bg-[#0B001F]/82
-              p-5
-              shadow-[0_0_28px_rgba(245,158,11,0.10)]
-            "
-          >
+          <div className="rounded-3xl border border-amber-400/25 bg-[#0B001F]/82 p-5 shadow-[0_0_28px_rgba(245,158,11,0.10)]">
             <p className="text-xs text-white/70">Quick Tip</p>
             <p className="text-sm font-semibold text-amber-100 mt-2 leading-snug">
               Verify quantity + shipping before submitting your offer.
@@ -332,31 +362,18 @@ const SellerDashboard = () => {
         {/* Requests */}
         <div className="mt-7 flex flex-col gap-5">
           {visibleRequests.length === 0 ? (
-            <div
-              className="
-                rounded-3xl
-                border border-white/15
-                bg-[#0B001F]/78
-                p-6
-                text-white/70
-              "
-            >
+            <div className="rounded-3xl border border-white/15 bg-[#0B001F]/78 p-6 text-white/70">
               No matching requests right now.
             </div>
           ) : (
             visibleRequests.map((req) => {
               const shipText = formatShipping(req?.shippingAddress);
-              const offer = offerMap?.[String(req._id)] || {
-                bestPrice: 0,
-                myPrice: 0,
-                status: "NO_OFFER",
-                bestSellerEmail: "",
-              };
+              const offer = offerMap?.[String(req._id)] || { bestPrice: 0, myPrice: 0, status: "NO_OFFER" };
 
               const statusUI = (() => {
                 if (offersLoading) {
                   return (
-                    <span className="inline-flex items-center gap-2 text-[11px] px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white/60">
+                    <span className="inline-flex items-center gap-2 text-[11px] px-3 py-1 rounded-full border border-white/20 bg-black/35 text-white/85">
                       <Minus className="w-3.5 h-3.5" /> Checking offers...
                     </span>
                   );
@@ -378,8 +395,16 @@ const SellerDashboard = () => {
                   );
                 }
 
+                if (offer.status === "ENDED") {
+                  return (
+                    <span className="inline-flex items-center gap-2 text-[11px] px-3 py-1 rounded-full border border-amber-400/25 bg-amber-500/10 text-amber-200 font-semibold">
+                      <Ban className="w-3.5 h-3.5" /> ENDED
+                    </span>
+                  );
+                }
+
                 return (
-                  <span className="inline-flex items-center gap-2 text-[11px] px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white/60">
+                  <span className="inline-flex items-center gap-2 text-[11px] px-3 py-1 rounded-full border border-white/20 bg-black/35 text-white/85">
                     <Minus className="w-3.5 h-3.5" /> NO OFFER YET
                   </span>
                 );
@@ -397,26 +422,18 @@ const SellerDashboard = () => {
                   "
                 >
                   <p className="text-xs text-white/70">
-                    {req.category} •{" "}
-                    <span className="text-white/85 font-semibold">
-                      {req.productName}
-                    </span>
+                    {req.category} • <span className="text-white/85 font-semibold">{req.productName}</span>
                   </p>
 
-                  <h3 className="mt-2 text-xl font-semibold text-white">
-                    {req.productName}
-                  </h3>
+                  <h3 className="mt-2 text-xl font-semibold text-white">{req.productName}</h3>
 
-                  {/* Offer status (seller competition) */}
                   <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
                     {statusUI}
 
                     <div className="text-[11px] text-white/70 text-right">
                       <div>
                         Best offer:{" "}
-                        <span className="text-amber-200 font-semibold">
-                          {formatMoney(offer.bestPrice)}
-                        </span>
+                        <span className="text-amber-200 font-semibold">{formatMoney(offer.bestPrice)}</span>
                       </div>
                       <div>
                         Your offer:{" "}
@@ -427,28 +444,19 @@ const SellerDashboard = () => {
                     </div>
                   </div>
 
-                  {/* Buyer */}
                   <p className="mt-2 text-xs text-white/70 flex items-center gap-2">
                     <User className="w-3.5 h-3.5 text-amber-200" />
                     {req.clientID?.fullName || "Unknown"}
                   </p>
 
-                  {/* Quantity */}
                   <p className="mt-2 text-xs text-white/75 flex items-center gap-2">
                     <Package className="w-3.5 h-3.5 text-cyan-200" />
-                    Qty:{" "}
-                    <span className="text-white/90 font-semibold">
-                      {req.quantity ?? "N/A"}
-                    </span>
+                    Qty: <span className="text-white/90 font-semibold">{req.quantity ?? "N/A"}</span>
                   </p>
 
-                  {/* Shipping */}
                   <p className="mt-2 text-xs text-white/75 flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5 text-cyan-200" />
-                    Ships to:{" "}
-                    <span className="text-white/90 font-semibold">
-                      {shipText || "Not provided"}
-                    </span>
+                    Ships to: <span className="text-white/90 font-semibold">{shipText || "Not provided"}</span>
                   </p>
 
                   <button
@@ -476,19 +484,9 @@ const SellerDashboard = () => {
           )}
         </div>
 
-        {/* Reminder */}
-        <div
-          className="
-            mt-10
-            bg-[#0B001F]/75
-            border border-amber-400/20
-            rounded-3xl
-            p-5
-            text-xs text-white/65
-          "
-        >
-          <span className="text-amber-200 font-semibold">Seller reminder:</span>{" "}
-          You only submit offers. The buyer chooses the winner.
+        <div className="mt-10 bg-[#0B001F]/75 border border-amber-400/20 rounded-3xl p-5 text-xs text-white/65">
+          <span className="text-amber-200 font-semibold">Seller reminder:</span> You only submit offers. The buyer
+          chooses the winner.
         </div>
       </div>
     </div>

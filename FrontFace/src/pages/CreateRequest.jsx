@@ -1,9 +1,10 @@
+// CreateRequest.jsx
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import logopic2 from "../assets/logopic2.png";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 // Canonical categories
 const CATEGORY_OPTIONS = [
@@ -46,8 +47,8 @@ function formatShipping(addr) {
   const country = addr.country || "";
   const postalCode = addr.postalCode || addr.zip || "";
 
-  const hasAny = [street, city, state, country, postalCode].some(
-    (v) => String(v || "").trim().length > 0
+  const hasAny = [street, city, state, country, postalCode].some((v) =>
+    String(v || "").trim().length > 0
   );
   if (!hasAny) return null;
 
@@ -165,7 +166,8 @@ export default function CreateRequest() {
       body: JSON.stringify(payload),
     });
 
-    if (res.ok) navigate("/buyerdashboard");
+    // ✅ FIX: your actual route is /buyer-dashboard (with dash)
+    if (res.ok) navigate("/buyer-dashboard");
     else {
       const data = await res.json().catch(() => ({}));
       alert(data?.message || `Error creating request (${res.status})`);
@@ -196,7 +198,7 @@ export default function CreateRequest() {
       >
         {/* Back arrow attached to the card */}
         <button
-          onClick={() => navigate("/buyerdashboard")}
+          onClick={() => navigate("/buyer-dashboard")}
           className="
             absolute -top-12 left-1
             rounded-xl
@@ -315,9 +317,7 @@ export default function CreateRequest() {
               <div>Loading default shipping address...</div>
             ) : defaultShipText ? (
               <>
-                <div className="text-cyan-200">
-                  Default shipping address:
-                </div>
+                <div className="text-cyan-200">Default shipping address:</div>
                 <div className="mt-1 text-white/90 text-sm">
                   {defaultShipText}
                 </div>

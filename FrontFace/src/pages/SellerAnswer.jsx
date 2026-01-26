@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
 
+const API = import.meta.env.VITE_API_URL;
+
 export default function SellerAnswer() {
   const { messageId } = useParams();   // ← Recibes SOLO un ID real
   const navigate = useNavigate();
@@ -15,7 +17,7 @@ export default function SellerAnswer() {
     const fetchMessage = async () => {
       try {
         const res = await axios.get(
-          `http://localhost:5000/api/messages/${messageId}`
+          `${API}/api/messages/${messageId}`
         );
         setOriginal(res.data);
       } catch (err) {
@@ -33,7 +35,7 @@ export default function SellerAnswer() {
 
     try {
       // EL VENDEDOR RESPONDE → CREA NUEVO MENSAJE
-      await axios.post("http://localhost:5000/api/messages", {
+      await axios.post(`${API}/api/messages`, {
         requestId: original.requestId,
         buyerId: original.buyerId,
         sellerId: original.sellerId,

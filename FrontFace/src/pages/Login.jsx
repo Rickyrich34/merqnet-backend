@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -14,11 +14,18 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // ✅ If already logged in, don't show login screen
+  useEffect(() => {
+    const token =
+      localStorage.getItem("userToken") || localStorage.getItem("token") || "";
+    if (token) navigate("/dashboard");
+  }, [navigate]);
+
   // ✅ IMPORTANT:
   // - In DEV: allow localhost fallback for local backend dev.
-  // - In PROD: DO NOT fallback. Force VITE_API_URL to be set in Vercel.
+  // - In PROD (Railway): DO NOT fallback. Force env var to be set.
   const API_BASE = useMemo(() => {
-    const fromEnv = import.meta.env.VITE_API_URL;
+    const fromEnv = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL;
 
     if (fromEnv && typeof fromEnv === "string") return fromEnv.replace(/\/$/, "");
 
@@ -42,7 +49,7 @@ export default function Login() {
 
   const validate = () => {
     if (!API_BASE || !API_LOGIN_URL) {
-      return "Missing VITE_API_URL in production. Set it in Vercel → Project → Settings → Environment Variables.";
+      return "Missing VITE_API_URL in production. Set it in Railway → merqnet-frontend → Variables.";
     }
     if (!formData.email.trim()) return "Email is required.";
     if (!formData.password) return "Password is required.";
@@ -63,7 +70,6 @@ export default function Login() {
     try {
       setLoading(true);
 
-      // ✅ IMPORTANT: Prove which URL production is actually calling
       console.log("LOGIN URL =>", API_LOGIN_URL);
 
       const res = await axios.post(
@@ -75,11 +81,10 @@ export default function Login() {
         {
           headers: { "Content-Type": "application/json" },
           withCredentials: false,
-          timeout: 15000, // ✅ prevents “forever logging in”
+          timeout: 15000,
         }
       );
 
-      // Adjust these keys only if your backend uses different names
       const token =
         res?.data?.token ||
         res?.data?.userToken ||
@@ -96,11 +101,9 @@ export default function Login() {
         throw new Error("Login succeeded but token was not returned by backend.");
       }
 
-      // ✅ Keep consistent with your existing app usage
       localStorage.setItem("userToken", token);
       if (userId) localStorage.setItem("userId", userId);
 
-      // ✅ Send user to dashboard after login
       navigate("/dashboard");
     } catch (err) {
       const isTimeout = err?.code === "ECONNABORTED";
@@ -127,7 +130,8 @@ export default function Login() {
         <div className="absolute inset-0 bg-gradient-to-b from-black via-black/80 to-black" />
       </div>
 
-      <div className="relative z-10 flex items-center justify-center px-4 py-10">
+      {/* ✅ Add top padding so the fixed Navbar never overlaps */}
+      <div className="relative z-10 flex items-start justify-center px-4 pt-28 sm:pt-32 pb-10">
         <div className="w-full max-w-md rounded-2xl border border-white/15 bg-white/5 backdrop-blur-xl shadow-2xl p-6">
           <div className="mb-6">
             <h1 className="text-3xl font-extrabold tracking-tight">
@@ -137,10 +141,10 @@ export default function Login() {
               Enter your credentials to access your dashboard.
             </p>
 
-            {/* Helpful prod hint */}
             {!import.meta.env.DEV && !API_BASE && (
               <div className="mt-3 rounded-lg border border-yellow-400/30 bg-yellow-400/10 p-3 text-xs text-yellow-100">
-                <b>Config needed:</b> Set <code className="px-1">VITE_API_URL</code> in Vercel or login will try to hit localhost.
+                <b>Config needed:</b> Set <code className="px-1">VITE_API_URL</code> in Railway (frontend
+                service variables).
               </div>
             )}
           </div>
@@ -221,7 +225,6 @@ export default function Login() {
               </Link>
             </div>
 
-            {/* Debug line (optional) */}
             <div className="pt-2 text-[11px] text-white/35">
               API: {API_BASE ? API_BASE : "(missing in production)"}
             </div>

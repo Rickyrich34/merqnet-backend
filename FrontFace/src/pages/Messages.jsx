@@ -1,14 +1,15 @@
-// src/pages/Messages.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { ChevronLeft } from "lucide-react";
 
+const API = import.meta.env.VITE_API_URL;
+
 function Messages() {
   const navigate = useNavigate();
 
   const userId = localStorage.getItem("userId");
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem("userToken") || localStorage.getItem("token");
 
   const [threads, setThreads] = useState([]);
   const [allMessages, setAllMessages] = useState([]); // optional: used for "View thread"
@@ -72,7 +73,7 @@ function Messages() {
     try {
       // ✅ Thread inbox endpoint (1 card per request)
       const res = await axios.get(
-        `http://localhost:5000/api/messages/threads/${userId}`,
+        `${API}/api/messages/threads/${userId}`,
         authHeaders
       );
 
@@ -85,7 +86,7 @@ function Messages() {
       // Optional: mark all as read when entering inbox
       try {
         await axios.put(
-          `http://localhost:5000/api/messages/mark-all-read/${userId}`,
+          `${API}/api/messages/mark-all-read/${userId}`,
           {},
           authHeaders
         );
@@ -104,7 +105,7 @@ function Messages() {
     if (!userId || !token) return;
     try {
       const res = await axios.get(
-        `http://localhost:5000/api/messages/user/${userId}`,
+        `${API}/api/messages/user/${userId}`,
         authHeaders
       );
       const sorted = (res.data || []).sort(
@@ -155,7 +156,7 @@ function Messages() {
     try {
       // ✅ uses your existing general creation endpoint
       await axios.post(
-        "http://localhost:5000/api/messages",
+        `${API}/api/messages`,
         {
           requestId,
           buyerId,

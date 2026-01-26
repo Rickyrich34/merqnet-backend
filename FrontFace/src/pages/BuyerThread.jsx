@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
+const API = import.meta.env.VITE_API_URL;
+
 export default function BuyerThread() {
   const { id } = useParams(); // Message ID
   const navigate = useNavigate();
@@ -11,7 +13,7 @@ export default function BuyerThread() {
   useEffect(() => {
     const fetchMessage = async () => {
       try {
-        const res = await fetch(`http://localhost:5000/api/messages/${id}`);
+        const res = await fetch(`${API}/api/messages/${id}`);
         const data = await res.json();
         setMessage(data);
       } catch (error) {

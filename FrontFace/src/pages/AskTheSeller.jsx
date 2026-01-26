@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 
+const API = import.meta.env.VITE_API_URL;
+
 function AskTheSeller() {
   const { otherUserId, requestId } = useParams();
 
@@ -18,7 +20,7 @@ function AskTheSeller() {
     const loadSeller = async () => {
       try {
         const res = await axios.get(
-          `http://localhost:5000/api/users/profile/${otherUserId}`,
+          `${API}/api/users/profile/${otherUserId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setSeller(res.data);
@@ -40,7 +42,7 @@ function AskTheSeller() {
 
     try {
       await axios.post(
-        "http://localhost:5000/api/messages/ask",
+        `${API}/api/messages/ask`,
         {
           requestId,
           buyerId,

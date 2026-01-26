@@ -7,7 +7,7 @@ export default function Signup() {
 
   // IMPORTANT: Trim whitespace/newlines from Vercel env var and remove trailing slash
   const API_BASE = useMemo(() => {
-    const raw = import.meta.env.VITE_API_URL || "http://localhost:5000";
+    const raw = import.meta.env.VITE_API_URL;
     return String(raw).trim().replace(/\/+$/, "");
   }, []);
 

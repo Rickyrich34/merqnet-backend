@@ -2,13 +2,15 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const API = import.meta.env.VITE_API_URL;
+
 const SellerProducts = () => {
   const [products, setProducts] = useState([]);
   const navigate = useNavigate();
   const sellerId = localStorage.getItem("userId");
 
   useEffect(() => {
-    fetch(`http://localhost:5000/api/products?clientID=${sellerId}`)
+    fetch(`${API}/api/products?clientID=${sellerId}`)
       .then((res) => res.json())
       .then((data) => setProducts(data))
       .catch((err) => console.error("Error fetching products:", err));
@@ -44,7 +46,7 @@ const SellerProducts = () => {
           <button
             className="bg-red-600 px-3 py-1 rounded mt-2"
             onClick={() => {
-              fetch(`http://localhost:5000/api/products/${p._id}`, {
+              fetch(`${API}/api/products/${p._id}`, {
                 method: "DELETE",
               }).then(() => window.location.reload());
             }}

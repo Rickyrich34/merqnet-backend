@@ -21,9 +21,9 @@ import {
   useStripe,
 } from "@stripe/react-stripe-js";
 
-// ✅ FIX: use Vercel/Vite env var, fallback to localhost
+
 const API = (() => {
-  const raw = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const raw = import.meta.env.VITE_API_URL;
   return String(raw).trim().replace(/\/+$/, "");
 })();
 
@@ -50,6 +50,24 @@ function formatCurrency(amount) {
   const n = Number(amount);
   if (!Number.isFinite(n)) return String(amount ?? "");
   return n.toLocaleString("en-US");
+}
+
+// ✅ Money format (2 decimals) just for payment breakdown
+function formatMoney(amount) {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return String(amount ?? "");
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ✅ MerqNet fee breakdown (6%)
+function calcMerqnetTotals(totalPrice) {
+  const subtotal = Number(totalPrice);
+  if (!Number.isFinite(subtotal) || subtotal < 0) {
+    return { subtotal: 0, fee: 0, total: 0 };
+  }
+  const fee = Number((subtotal * 0.06).toFixed(2));
+  const total = Number((subtotal + fee).toFixed(2));
+  return { subtotal, fee, total };
 }
 
 // -------------------------
@@ -260,6 +278,8 @@ function PaymentMethodsNoStripe({ bidIdFromRoute }) {
     }
   };
 
+  const breakdown = useMemo(() => calcMerqnetTotals(bid?.totalPrice), [bid?.totalPrice]);
+
   return (
     <PageShell
       title={bidIdFromRoute ? "Proceed to Payment" : "Payment Methods"}
@@ -291,10 +311,23 @@ function PaymentMethodsNoStripe({ bidIdFromRoute }) {
                 <div className="mt-1 text-white/90 font-semibold break-all">
                   {bid?._id || bidIdFromRoute}
                 </div>
-                <div className="mt-3 text-white/60 text-xs">Total</div>
-                <div className="mt-1 text-orange-200 font-bold text-lg">
-                  ${formatCurrency(bid?.totalPrice)}
+
+                {/* ✅ Breakdown */}
+                <div className="mt-3 text-white/60 text-xs">Subtotal</div>
+                <div className="mt-1 text-white/90 font-semibold">
+                  ${formatMoney(breakdown.subtotal)}
                 </div>
+
+                <div className="mt-3 text-white/60 text-xs">MerqNet Fee (6%)</div>
+                <div className="mt-1 text-fuchsia-200 font-semibold">
+                  ${formatMoney(breakdown.fee)}
+                </div>
+
+                <div className="mt-3 text-white/60 text-xs">Total Charged</div>
+                <div className="mt-1 text-orange-200 font-bold text-lg">
+                  ${formatMoney(breakdown.total)}
+                </div>
+
                 <div className="mt-3 text-white/60 text-xs">Delivery</div>
                 <div className="mt-1 text-white/85">{bid?.deliveryTime || "—"}</div>
               </div>
@@ -388,7 +421,7 @@ function PaymentMethodsNoStripe({ bidIdFromRoute }) {
               Add Stripe key to enable paying from this page.
             </div>
             <button
-              onClick={() => navigate("/payment-methods")}
+              onClick={() => navigate("/paymentmethods")}
               className="mt-4 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold transition"
             >
               Go to Payment Methods
@@ -428,6 +461,8 @@ function PaymentMethodsStripe({ bidIdFromRoute }) {
   const [paying, setPaying] = useState(false);
   const [payErr, setPayErr] = useState("");
   const [payOk, setPayOk] = useState("");
+
+  const breakdown = useMemo(() => calcMerqnetTotals(bid?.totalPrice), [bid?.totalPrice]);
 
   const setDefault = async (card) => {
     if (!card?.last4) return;
@@ -596,10 +631,23 @@ function PaymentMethodsStripe({ bidIdFromRoute }) {
                 <div className="mt-1 text-white/90 font-semibold break-all">
                   {bid?._id || bidIdFromRoute}
                 </div>
-                <div className="mt-3 text-white/60 text-xs">Total</div>
-                <div className="mt-1 text-orange-200 font-bold text-lg">
-                  ${formatCurrency(bid?.totalPrice)}
+
+                {/* ✅ Breakdown */}
+                <div className="mt-3 text-white/60 text-xs">Subtotal</div>
+                <div className="mt-1 text-white/90 font-semibold">
+                  ${formatMoney(breakdown.subtotal)}
                 </div>
+
+                <div className="mt-3 text-white/60 text-xs">MerqNet Fee (6%)</div>
+                <div className="mt-1 text-fuchsia-200 font-semibold">
+                  ${formatMoney(breakdown.fee)}
+                </div>
+
+                <div className="mt-3 text-white/60 text-xs">Total Charged</div>
+                <div className="mt-1 text-orange-200 font-bold text-lg">
+                  ${formatMoney(breakdown.total)}
+                </div>
+
                 <div className="mt-3 text-white/60 text-xs">Delivery</div>
                 <div className="mt-1 text-white/85">{bid?.deliveryTime || "—"}</div>
               </div>
