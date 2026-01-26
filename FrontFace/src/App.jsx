@@ -55,35 +55,29 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
-        {/* DASHBOARDS */}
+        {/* DASHBOARDS (NO HYPHENS) */}
         <Route path="/dashboard" element={<MainDashboard />} />
-        <Route path="/buyer-dashboard" element={<BuyerDashboard />} />
-        <Route path="/seller-dashboard" element={<SellerDashboard />} />
+        <Route path="/buyerdashboard" element={<BuyerDashboard />} />
+        <Route path="/sellerdashboard" element={<SellerDashboard />} />
 
-        {/* REQUESTS / BIDS FLOW */}
-        <Route path="/create-request" element={<CreateRequest />} />
+        {/* REQUESTS / BIDS FLOW (NO HYPHENS) */}
         <Route path="/createrequest" element={<CreateRequest />} />
-
-        <Route path="/submit-bid/:requestId" element={<SubmitBid />} />
         <Route path="/submitbid/:requestId" element={<SubmitBid />} />
 
-        <Route path="/accept-bid/:bidId" element={<AcceptBid />} />
-
-        {/* ✅ BuyerDashboard -> View bids */}
+        {/* Accept / Offers */}
+        <Route path="/acceptbid/:bidId" element={<AcceptBid />} />
         <Route path="/bids/:requestId" element={<AcceptBid />} />
-
-        {/* Existing accept flow */}
         <Route path="/requests/:requestId/acceptbid" element={<AcceptBid />} />
 
-        {/* MESSAGE THREADS / Q&A */}
-        <Route path="/answer-back/:threadId" element={<AnswerBack />} />
-        <Route path="/seller-answer/:threadId" element={<SellerAnswer />} />
-        <Route path="/ask-the-seller/:requestId" element={<AskTheSeller />} />
-        <Route path="/buyer-thread/:threadId" element={<BuyerThread />} />
+        {/* MESSAGE THREADS / Q&A (NO HYPHENS) */}
+        <Route path="/answerback/:threadId" element={<AnswerBack />} />
+        <Route path="/selleranswer/:threadId" element={<SellerAnswer />} />
+        <Route path="/asktheseller/:requestId" element={<AskTheSeller />} />
+        <Route path="/buyerthread/:threadId" element={<BuyerThread />} />
 
-        {/* SELLER */}
-        <Route path="/seller-products" element={<SellerProducts />} />
-        <Route path="/seller-bids" element={<SellerBids />} />
+        {/* SELLER (NO HYPHENS) */}
+        <Route path="/sellerproducts" element={<SellerProducts />} />
+        <Route path="/sellerbids" element={<SellerBids />} />
 
         {/* PAYMENTS */}
         <Route path="/paymentmethods" element={<PaymentMethods />} />
