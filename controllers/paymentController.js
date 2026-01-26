@@ -96,13 +96,11 @@ exports.addCard = async (req, res) => {
 
     const customerId = await ensureStripeCustomer(user, stripe);
 
-    // Attach PM to customer
     try {
       await stripe.paymentMethods.attach(paymentMethodId, {
         customer: customerId,
       });
     } catch (e) {
-      // If already attached, Stripe throws — ignore that case safely
       const msg = String(e?.message || "");
       if (!msg.toLowerCase().includes("already")) {
         console.error("attach paymentMethod error:", e);
@@ -112,7 +110,6 @@ exports.addCard = async (req, res) => {
       }
     }
 
-    // Retrieve details (brand/last4/exp)
     const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
     const card = pm?.card || {};
     const brand = card?.brand ? String(card.brand).toUpperCase() : "CARD";
@@ -122,7 +119,6 @@ exports.addCard = async (req, res) => {
 
     if (!Array.isArray(user.cards)) user.cards = [];
 
-    // Prevent duplicates
     const exists = user.cards.some(
       (c) => c.stripePaymentMethodId === paymentMethodId
     );
@@ -133,13 +129,11 @@ exports.addCard = async (req, res) => {
         last4,
         expMonth,
         expYear,
-        isDefault: user.cards.length === 0, // first card default
+        isDefault: user.cards.length === 0,
       });
     }
 
-    // Ensure local default always exists
     await ensureLocalDefaultCard(user);
-
     await user.save();
 
     return res.status(200).json({ message: "Card added" });
@@ -151,7 +145,6 @@ exports.addCard = async (req, res) => {
 
 // -----------------------------
 // SET DEFAULT CARD
-// Frontend calls PUT /cards/default with body { stripePaymentMethodId }
 // -----------------------------
 exports.setDefaultCard = async (req, res) => {
   try {
@@ -180,13 +173,11 @@ exports.setDefaultCard = async (req, res) => {
 
     const customerId = await ensureStripeCustomer(user, stripe);
 
-    // Set Stripe default payment method (invoice_settings)
     try {
       await stripe.customers.update(customerId, {
         invoice_settings: { default_payment_method: stripePaymentMethodId },
       });
     } catch (e) {
-      // Not fatal for UI; local default still set
       console.error("stripe set default PM error:", e);
     }
 
@@ -199,7 +190,6 @@ exports.setDefaultCard = async (req, res) => {
 
 // -----------------------------
 // DELETE CARD
-// Frontend calls DELETE /cards/:id where :id is Mongo subdoc _id
 // -----------------------------
 exports.deleteCard = async (req, res) => {
   try {
@@ -222,21 +212,17 @@ exports.deleteCard = async (req, res) => {
     const removed = user.cards[idx];
     user.cards.splice(idx, 1);
 
-    // If removed default -> set first as default
     if (removed?.isDefault && user.cards.length > 0) {
       user.cards.forEach((c, i) => (c.isDefault = i === 0));
     }
 
     await user.save();
 
-    // Detach from Stripe customer (best effort)
     try {
       if (user.stripeCustomerId && removed?.stripePaymentMethodId) {
         await stripe.paymentMethods.detach(removed.stripePaymentMethodId);
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (_) {}
 
     return res.status(200).json({ message: "Card deleted" });
   } catch (err) {
@@ -247,7 +233,6 @@ exports.deleteCard = async (req, res) => {
 
 // -----------------------------
 // SUMMARY
-// GET /summary/:bidId -> { bid, request }
 // -----------------------------
 exports.getSummary = async (req, res) => {
   try {
@@ -260,14 +245,12 @@ exports.getSummary = async (req, res) => {
     const bid = await Bid.findById(bidId);
     if (!bid) return res.status(404).json({ message: "Bid not found" });
 
-    const requestId = bid.requestId;
-    const request = await Request.findById(requestId);
+    const request = await Request.findById(bid.requestId);
     if (!request) return res.status(404).json({ message: "Request not found" });
 
     const buyerId = request.clientID || request.clientId;
-    if (String(buyerId) !== String(userId)) {
+    if (String(buyerId) !== String(userId))
       return res.status(403).json({ message: "Forbidden" });
-    }
 
     return res.status(200).json({ bid, request });
   } catch (err) {
@@ -278,8 +261,6 @@ exports.getSummary = async (req, res) => {
 
 // -----------------------------
 // PAY NOW
-// POST /pay with body { bidId }
-// returns { receiptId }
 // -----------------------------
 exports.payNow = async (req, res) => {
   try {
@@ -302,51 +283,47 @@ exports.payNow = async (req, res) => {
     if (!request) return res.status(404).json({ message: "Request not found" });
 
     const buyerId = request.clientID || request.clientId;
-    if (String(buyerId) !== String(user._id)) {
-      return res
-        .status(403)
-        .json({ message: "Forbidden: only buyer can pay" });
-    }
+    if (String(buyerId) !== String(user._id))
+      return res.status(403).json({ message: "Forbidden: only buyer can pay" });
 
-    if (!bid.accepted) {
+    if (!bid.accepted)
       return res.status(400).json({ message: "Bid is not accepted" });
-    }
 
-    // If already paid, return existing receipt
     const existingReceipt = await Receipt.findOne({
       bidId: bid._id,
       status: "paid",
     });
-    if (existingReceipt) {
+    if (existingReceipt)
       return res.status(200).json({
         message: "Already paid",
         receiptId: existingReceipt.receiptId,
       });
-    }
 
-    // Must have default card
     const def = await ensureLocalDefaultCard(user);
-    const pmId = def?.stripePaymentMethodId || "";
-    if (!pmId) return res.status(400).json({ message: "No default card set" });
+
+    // ✅ COMPATIBILIDAD VIEJA + NUEVA
+    const pmId =
+      def?.stripePaymentMethodId ||
+      def?.stripeSourceId ||
+      "";
+
+    if (!pmId)
+      return res.status(400).json({ message: "No default card set" });
 
     const customerId = await ensureStripeCustomer(user, stripe);
 
-    // Make sure this PM is attached (best effort)
     try {
       await stripe.paymentMethods.attach(pmId, { customer: customerId });
     } catch (_) {}
 
-    // Charge total = bid.totalPrice + 6% fee
     const subtotal = Number(bid.totalPrice);
-    if (!Number.isFinite(subtotal) || subtotal <= 0) {
+    if (!Number.isFinite(subtotal) || subtotal <= 0)
       return res.status(400).json({ message: "Invalid bid total price" });
-    }
 
     const merqnetFee = Number((subtotal * 0.06).toFixed(2));
     const totalToCharge = Number((subtotal + merqnetFee).toFixed(2));
     const amountCents = Math.round(totalToCharge * 100);
 
-    // PaymentIntent (correct for pm_...)
     const pi = await stripe.paymentIntents.create({
       amount: amountCents,
       currency: "usd",
@@ -354,29 +331,10 @@ exports.payNow = async (req, res) => {
       payment_method: pmId,
       confirm: true,
       off_session: true,
-      description: `MerqNet payment | request ${request._id} | bid ${bid._id}`,
-      metadata: {
-        requestId: String(request._id),
-        bidId: String(bid._id),
-        buyerId: String(user._id),
-        sellerId: String(bid.sellerId),
-        subtotal: String(subtotal),
-        merqnetFee: String(merqnetFee),
-        totalCharged: String(totalToCharge),
-      },
     });
 
-    if (pi.status !== "succeeded") {
+    if (pi.status !== "succeeded")
       return res.status(400).json({ message: "Payment did not succeed" });
-    }
-
-    // Build payment method label
-    const brand = def?.brand ? String(def.brand).toUpperCase() : null;
-    const last4 = def?.last4 || null;
-    const expMonth = def?.expMonth ?? null;
-    const expYear = def?.expYear ?? null;
-    const paymentMethodLabel =
-      brand && last4 ? `${brand} •••• ${last4}` : null;
 
     const receiptDoc = await Receipt.create({
       receiptId: makeReceiptId(),
@@ -384,19 +342,10 @@ exports.payNow = async (req, res) => {
       bidId: bid._id,
       buyerId: user._id,
       sellerId: bid.sellerId,
-
       amount: totalToCharge,
       currency: "usd",
-
       stripePaymentIntentId: pi.id,
       stripePaymentMethodId: pmId,
-
-      paymentMethod: paymentMethodLabel,
-      cardBrand: brand,
-      cardLast4: last4,
-      cardExpMonth: expMonth,
-      cardExpYear: expYear,
-
       status: "paid",
       viewedByBuyer: true,
       viewedBySeller: false,
@@ -408,8 +357,6 @@ exports.payNow = async (req, res) => {
     });
   } catch (err) {
     console.error("payNow error:", err);
-
-    const msg = String(err?.message || "Payment failed");
-    return res.status(500).json({ message: msg });
+    return res.status(500).json({ message: String(err?.message || "Payment failed") });
   }
 };
