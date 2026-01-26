@@ -83,6 +83,33 @@ function getQuantity(req) {
   return req?.quantity ?? req?.qty ?? req?.amount ?? "—";
 }
 
+/**
+ * IMPORTANT:
+ * BuyerDashboard MUST NOT show completed/paid/closed/expired requests.
+ * This function tries multiple common fields so it works with your backend
+ * even if naming differs across endpoints.
+ */
+function isExpiredRequest(r) {
+  const status = String(r?.status || r?.requestStatus || "").toLowerCase();
+  const paymentStatus = String(r?.paymentStatus || "").toLowerCase();
+
+  // Strong "paid/completed" signals
+  const paidFlag = r?.isPaid === true || r?.paid === true;
+  const hasReceipt = Boolean(r?.receiptId || r?.receiptURL || r?.receiptUrl);
+
+  return (
+    paidFlag ||
+    hasReceipt ||
+    paymentStatus === "paid" ||
+    status.includes("paid") ||
+    status.includes("closed") ||
+    status.includes("completed") ||
+    status.includes("expired") ||
+    status.includes("canceled") ||
+    status.includes("cancelled")
+  );
+}
+
 /* ----------------------------- API CALLS ----------------------------- */
 async function apiGet(path) {
   const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -124,6 +151,7 @@ export default function BuyerDashboard() {
         setLoading(true);
         const data = await apiGet(`/api/requests/buyer/${userId}`);
         if (cancelled) return;
+
         const list = Array.isArray(data) ? data : data?.requests || [];
         setRequests(list);
       } catch (err) {
@@ -166,6 +194,9 @@ export default function BuyerDashboard() {
     };
 
     if (!requests?.length) return;
+
+    // Keep your existing behavior: load offers info for each request
+    // (We don't break anything here.)
     requests.forEach((r) => {
       const rid = normalizeId(r?._id || r?.id);
       if (rid) loadOffersFor(rid);
@@ -174,10 +205,18 @@ export default function BuyerDashboard() {
     return () => (cancelled = true);
   }, [requests]);
 
+  /**
+   * CORE FIX:
+   * We only show ACTIVE requests (not paid/closed/completed/expired).
+   * Then search applies on top of that.
+   */
   const filtered = useMemo(() => {
+    const activeRequests = (requests || []).filter((r) => !isExpiredRequest(r));
+
     const q = query.trim().toLowerCase();
-    if (!q) return requests;
-    return requests.filter((r) => {
+    if (!q) return activeRequests;
+
+    return activeRequests.filter((r) => {
       const id = String(r?._id || r?.id || "").toLowerCase();
       const name = String(getTitle(r)).toLowerCase();
       const cat = String(getCategory(r)).toLowerCase();
@@ -187,7 +226,9 @@ export default function BuyerDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">Loading…</div>
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        Loading…
+      </div>
     );
   }
 
@@ -245,38 +286,44 @@ export default function BuyerDashboard() {
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-4">
-          {filtered.map((r) => {
-            const rid = normalizeId(r?._id || r?.id);
-            const info = offersMap[rid] || { offersCount: 0, lowestOffer: null };
+          {filtered.length === 0 ? (
+            <div className="border border-white/10 rounded-2xl p-6 bg-[#0B001F]/60 text-white/70 text-center">
+              No active requests right now. Paid/closed/expired requests won’t show here.
+            </div>
+          ) : (
+            filtered.map((r) => {
+              const rid = normalizeId(r?._id || r?.id);
+              const info = offersMap[rid] || { offersCount: 0, lowestOffer: null };
 
-            return (
-              <div
-                key={rid}
-                className="border border-white/10 rounded-2xl p-4 bg-[#0B001F]/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
-              >
-                <div>
-                  <div className="font-semibold">{getTitle(r)}</div>
-                  <div className="text-xs text-white/50">Category: {getCategory(r)}</div>
-                  <div className="text-xs text-white/50">Qty: {fmtQty(getQuantity(r))}</div>
-                </div>
-
-                <div className="flex items-center gap-6">
-                  <div className="text-xs text-white/60">Offers: {info.offersCount}</div>
-                  <div className="text-sm text-cyan-200 font-semibold">
-                    {info.lowestOffer !== null ? fmtMoney(info.lowestOffer) : "—"}
+              return (
+                <div
+                  key={rid}
+                  className="border border-white/10 rounded-2xl p-4 bg-[#0B001F]/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                >
+                  <div>
+                    <div className="font-semibold">{getTitle(r)}</div>
+                    <div className="text-xs text-white/50">Category: {getCategory(r)}</div>
+                    <div className="text-xs text-white/50">Qty: {fmtQty(getQuantity(r))}</div>
                   </div>
 
-                  <button
-                    onClick={() => navigate(`/bids/${rid}`)}
-                    className="flex items-center gap-1 text-sm px-4 py-2 rounded-xl font-bold text-black bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 transition shadow-[0_8px_25px_rgba(251,191,36,0.45)]"
-                  >
-                    <ReceiptText className="w-4 h-4" />
-                    View bids
-                  </button>
+                  <div className="flex items-center gap-6">
+                    <div className="text-xs text-white/60">Offers: {info.offersCount}</div>
+                    <div className="text-sm text-cyan-200 font-semibold">
+                      {info.lowestOffer !== null ? fmtMoney(info.lowestOffer) : "—"}
+                    </div>
+
+                    <button
+                      onClick={() => navigate(`/bids/${rid}`)}
+                      className="flex items-center gap-1 text-sm px-4 py-2 rounded-xl font-bold text-black bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 transition shadow-[0_8px_25px_rgba(251,191,36,0.45)]"
+                    >
+                      <ReceiptText className="w-4 h-4" />
+                      View bids
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       </div>
     </div>
