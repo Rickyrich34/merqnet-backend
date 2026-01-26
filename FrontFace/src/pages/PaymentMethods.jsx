@@ -21,53 +21,32 @@ import {
   useStripe,
 } from "@stripe/react-stripe-js";
 
+// -------------------------
+// ENV
+// -------------------------
+const API_BASE = import.meta.env.VITE_API_URL;
 
-const API = (() => {
-  const raw = import.meta.env.VITE_API_URL;
-  return String(raw).trim().replace(/\/+$/, "");
-})();
+// Stripe PK (front)
+const STRIPE_PK = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 
-// ✅ Put this in .env and restart Vite:
-// VITE_STRIPE_PUBLISHABLE_KEY=pk_test_...
-const STRIPE_PK = import.meta?.env?.VITE_STRIPE_PUBLISHABLE_KEY || "";
+// Safe stripe init (can be missing in dev)
 const stripePromise = STRIPE_PK ? loadStripe(STRIPE_PK) : null;
 
 // -------------------------
-// helpers
+// Helpers
 // -------------------------
 function getToken() {
   return localStorage.getItem("userToken") || localStorage.getItem("token") || "";
 }
 
-function authHeaders() {
-  const token = getToken();
-  return token
-    ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-    : { "Content-Type": "application/json" };
+function getUserId() {
+  return localStorage.getItem("userId") || "";
 }
 
-function formatCurrency(amount) {
+function money(amount) {
   const n = Number(amount);
   if (!Number.isFinite(n)) return String(amount ?? "");
   return n.toLocaleString("en-US");
-}
-
-// ✅ Money format (2 decimals) just for payment breakdown
-function formatMoney(amount) {
-  const n = Number(amount);
-  if (!Number.isFinite(n)) return String(amount ?? "");
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-// ✅ MerqNet fee breakdown (6%)
-function calcMerqnetTotals(totalPrice) {
-  const subtotal = Number(totalPrice);
-  if (!Number.isFinite(subtotal) || subtotal < 0) {
-    return { subtotal: 0, fee: 0, total: 0 };
-  }
-  const fee = Number((subtotal * 0.06).toFixed(2));
-  const total = Number((subtotal + fee).toFixed(2));
-  return { subtotal, fee, total };
 }
 
 // -------------------------
@@ -77,7 +56,7 @@ function PageShell({ title, subtitle, children }) {
   const navigate = useNavigate();
 
   return (
-    <div className="relative min-h-screen w-full text-white overflow-x-hidden bg-black">
+    <div className="relative min-h-[100svh] w-full text-white overflow-x-hidden bg-black">
       {/* Galaxy background */}
       <div className="absolute inset-0 -z-10">
         <div
@@ -99,7 +78,8 @@ function PageShell({ title, subtitle, children }) {
         />
       </div>
 
-      <div className="relative z-10 max-w-5xl mx-auto pt-32 px-6 pb-20 space-y-8">
+      {/* ✅ MOBILE-FIRST: extra bottom padding so fixed bottom bar never covers content */}
+      <div className="relative z-10 max-w-5xl mx-auto pt-32 px-6 pb-32 md:pb-20 space-y-8">
         <button
           onClick={() => navigate(-1)}
           className="w-12 h-12 flex items-center justify-center rounded-xl border border-white/15 bg-[#0b0a1c]/70 hover:bg-[#0b0a1c]/85 transition backdrop-blur-md text-white/80 hover:text-white"
@@ -137,22 +117,14 @@ function usePaymentData(bidIdFromRoute) {
     try {
       setCardsLoading(true);
       setCardsErr("");
-
-      const res = await fetch(`${API}/api/payments/cards`, {
-        headers: authHeaders(),
+      const res = await fetch(`${API_BASE}/api/payments/cards`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
       });
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setCardsErr(data?.message || "Error loading cards");
-        setCards([]);
-        return;
-      }
-
-      setCards(Array.isArray(data?.cards) ? data.cards : []);
-    } catch {
-      setCardsErr("Network error loading cards");
-      setCards([]);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Failed to load cards");
+      setCards(Array.isArray(data) ? data : data?.cards || []);
+    } catch (e) {
+      setCardsErr(e.message || "Failed to load cards");
     } finally {
       setCardsLoading(false);
     }
@@ -160,40 +132,18 @@ function usePaymentData(bidIdFromRoute) {
 
   const loadSummary = async () => {
     if (!bidIdFromRoute) return;
-
     try {
       setSummaryLoading(true);
       setSummaryErr("");
-      setBid(null);
-      setRequest(null);
-
-      const bidRes = await fetch(`${API}/api/bids/${bidIdFromRoute}`, {
-        headers: authHeaders(),
+      const res = await fetch(`${API_BASE}/api/payments/summary/${bidIdFromRoute}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
       });
-      const bidData = await bidRes.json().catch(() => ({}));
-      if (!bidRes.ok) {
-        setSummaryErr(bidData?.message || "Error loading bid");
-        return;
-      }
-      setBid(bidData);
-
-      const reqId = bidData?.requestId;
-      if (!reqId) {
-        setSummaryErr("Bid has no requestId");
-        return;
-      }
-
-      const reqRes = await fetch(`${API}/api/requests/${reqId}`, {
-        headers: authHeaders(),
-      });
-      const reqData = await reqRes.json().catch(() => ({}));
-      if (!reqRes.ok) {
-        setSummaryErr(reqData?.message || "Error loading request");
-        return;
-      }
-      setRequest(reqData);
-    } catch {
-      setSummaryErr("Network error loading summary");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Failed to load summary");
+      setBid(data?.bid || null);
+      setRequest(data?.request || null);
+    } catch (e) {
+      setSummaryErr(e.message || "Failed to load summary");
     } finally {
       setSummaryLoading(false);
     }
@@ -201,193 +151,249 @@ function usePaymentData(bidIdFromRoute) {
 
   useEffect(() => {
     loadCards();
-    // eslint-disable-next-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     loadSummary();
-    // eslint-disable-next-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bidIdFromRoute]);
+
+  const defaultCard = useMemo(
+    () => cards.find((c) => c.isDefault) || null,
+    [cards]
+  );
 
   return {
     cards,
     cardsLoading,
     cardsErr,
-    setCardsErr,
     loadCards,
+    defaultCard,
 
     bid,
     request,
     summaryLoading,
     summaryErr,
+    loadSummary,
   };
 }
 
 // -------------------------
-// NO STRIPE version (no hooks, no crash)
+// Shared actions (no Stripe hooks)
+// -------------------------
+async function apiSetDefault(card) {
+  const res = await fetch(`${API_BASE}/api/payments/cards/default`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ stripePaymentMethodId: card.stripePaymentMethodId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || "Failed to set default");
+  return data;
+}
+
+async function apiDeleteCard(card) {
+  const res = await fetch(`${API_BASE}/api/payments/cards/${card._id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || "Failed to delete card");
+  return data;
+}
+
+async function apiPay(bidId) {
+  const res = await fetch(`${API_BASE}/api/payments/pay`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+    },
+    body: JSON.stringify({ bidId }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || "Payment failed");
+  return data;
+}
+
+// -------------------------
+// NO-Stripe version
 // -------------------------
 function PaymentMethodsNoStripe({ bidIdFromRoute }) {
   const navigate = useNavigate();
+
   const {
     cards,
     cardsLoading,
     cardsErr,
-    setCardsErr,
     loadCards,
+    defaultCard,
     bid,
     request,
     summaryLoading,
     summaryErr,
+    loadSummary,
   } = usePaymentData(bidIdFromRoute);
 
-  const defaultCard = useMemo(() => cards.find((c) => c.isDefault), [cards]);
+  const [busyId, setBusyId] = useState("");
+  const [busyAction, setBusyAction] = useState("");
+  const [globalErr, setGlobalErr] = useState("");
+  const [paying, setPaying] = useState(false);
+  const [payErr, setPayErr] = useState("");
+  const [payOk, setPayOk] = useState("");
 
   const setDefault = async (card) => {
-    if (!card?.last4) return;
     try {
-      const res = await fetch(`${API}/api/payments/cards/${card.last4}/default`, {
-        method: "PATCH",
-        headers: authHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setCardsErr(data?.message || "Failed to set default card");
-        return;
-      }
+      setGlobalErr("");
+      setBusyId(card._id);
+      setBusyAction("default");
+      await apiSetDefault(card);
       await loadCards();
-    } catch {
-      setCardsErr("Network error setting default");
+    } catch (e) {
+      setGlobalErr(e.message || "Failed");
+    } finally {
+      setBusyId("");
+      setBusyAction("");
     }
   };
 
   const deleteCard = async (card) => {
-    if (!card?.last4) return;
     try {
-      const res = await fetch(`${API}/api/payments/cards/${card.last4}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setCardsErr(data?.message || "Failed to delete card");
-        return;
-      }
+      setGlobalErr("");
+      setBusyId(card._id);
+      setBusyAction("delete");
+      await apiDeleteCard(card);
       await loadCards();
-    } catch {
-      setCardsErr("Network error deleting card");
+    } catch (e) {
+      setGlobalErr(e.message || "Failed");
+    } finally {
+      setBusyId("");
+      setBusyAction("");
     }
   };
 
-  const breakdown = useMemo(() => calcMerqnetTotals(bid?.totalPrice), [bid?.totalPrice]);
+  const payNow = async () => {
+    if (!bidIdFromRoute) return;
+    try {
+      setPayErr("");
+      setPayOk("");
+      setPaying(true);
+
+      const data = await apiPay(bidIdFromRoute);
+
+      // If backend returns receiptId, route to it
+      const receiptId = data?.receiptId || data?.receipt?._id || data?.receipt?._id;
+      if (receiptId) {
+        navigate(`/receipt/${receiptId}`);
+        return;
+      }
+
+      setPayOk("Payment completed.");
+      await loadSummary();
+    } catch (e) {
+      setPayErr(e.message || "Payment failed");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const totalCharged = useMemo(() => {
+    const t =
+      request?.wholeLotPrice ??
+      request?.total ??
+      bid?.totalPrice ??
+      bid?.price ??
+      0;
+    const n = Number(t);
+    if (!Number.isFinite(n)) return null;
+    return n * 1.06;
+  }, [bid, request]);
 
   return (
     <PageShell
-      title={bidIdFromRoute ? "Proceed to Payment" : "Payment Methods"}
-      subtitle={
-        bidIdFromRoute
-          ? "Stripe key missing. You can view cards/summary but cannot add a card here."
-          : "Stripe key missing. You can view/delete cards but cannot add a card here."
-      }
+      title="Payment Methods"
+      subtitle="Add a card and set a default payment method."
     >
       {/* Summary */}
-      {bidIdFromRoute && (
+      {bidIdFromRoute ? (
         <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
-          <div className="flex items-center gap-2 text-white/85 font-semibold">
-            <CheckCircle2 className="w-5 h-5 text-emerald-300" />
-            Payment Summary
-          </div>
+          <div className="text-white/90 font-semibold">Payment Summary</div>
 
           {summaryLoading ? (
-            <div className="mt-4 text-white/60 flex items-center gap-2">
+            <div className="mt-4 text-white/70 flex items-center gap-2 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
               Loading summary...
             </div>
           ) : summaryErr ? (
-            <div className="mt-4 text-red-400">{summaryErr}</div>
+            <div className="mt-4 text-red-400 text-sm">{summaryErr}</div>
           ) : (
-            <div className="mt-4 grid md:grid-cols-2 gap-4 text-sm">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-white/60 text-xs">Bid</div>
-                <div className="mt-1 text-white/90 font-semibold break-all">
-                  {bid?._id || bidIdFromRoute}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="text-xs text-white/60">Product</div>
+                <div className="mt-1 text-sm font-semibold text-white/90">
+                  {request?.productName || "N/A"}
                 </div>
-
-                {/* ✅ Breakdown */}
-                <div className="mt-3 text-white/60 text-xs">Subtotal</div>
-                <div className="mt-1 text-white/90 font-semibold">
-                  ${formatMoney(breakdown.subtotal)}
-                </div>
-
-                <div className="mt-3 text-white/60 text-xs">MerqNet Fee (6%)</div>
-                <div className="mt-1 text-fuchsia-200 font-semibold">
-                  ${formatMoney(breakdown.fee)}
-                </div>
-
-                <div className="mt-3 text-white/60 text-xs">Total Charged</div>
-                <div className="mt-1 text-orange-200 font-bold text-lg">
-                  ${formatMoney(breakdown.total)}
-                </div>
-
-                <div className="mt-3 text-white/60 text-xs">Delivery</div>
-                <div className="mt-1 text-white/85">{bid?.deliveryTime || "—"}</div>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-white/60 text-xs">Request</div>
-                <div className="mt-1 text-white/90 font-semibold break-all">
-                  {request?._id || bid?.requestId || "—"}
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="text-xs text-white/60">Total Charged (incl. 6% MerqNet fee)</div>
+                <div className="mt-1 text-sm font-semibold text-emerald-300">
+                  {totalCharged != null ? `USD ${money(totalCharged.toFixed(2))}` : "N/A"}
                 </div>
-                <div className="mt-3 text-white/60 text-xs">Product</div>
-                <div className="mt-1 text-white/85">
-                  {request?.productName || request?.title || "—"}
-                </div>
-                <div className="mt-3 text-white/60 text-xs">Category</div>
-                <div className="mt-1 text-white/85">{request?.category || "—"}</div>
               </div>
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Cards */}
       <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
-        <div className="flex items-center gap-2 text-white/90 font-semibold">
-          <CreditCard className="w-5 h-5 text-cyan-200" />
-          Saved Cards
-        </div>
+        <div className="flex items-center justify-between">
+          <div className="text-white/90 font-semibold">Saved Cards</div>
 
-        <div className="mt-3 text-red-400 text-sm">
-          Missing <span className="font-semibold">VITE_STRIPE_PUBLISHABLE_KEY</span>. Add it to your
-          .env and restart Vite to enable Stripe Elements.
+          <button
+            onClick={loadCards}
+            className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition text-xs font-semibold"
+          >
+            Refresh
+          </button>
         </div>
 
         {cardsLoading ? (
-          <div className="mt-4 text-white/60 flex items-center gap-2">
+          <div className="mt-4 text-white/70 flex items-center gap-2 text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
             Loading cards...
           </div>
         ) : cardsErr ? (
-          <div className="mt-4 text-red-400">{cardsErr}</div>
+          <div className="mt-4 text-red-400 text-sm">{cardsErr}</div>
         ) : cards.length === 0 ? (
-          <div className="mt-4 text-white/60">No cards saved yet.</div>
+          <div className="mt-4 text-white/65 text-sm">
+            No cards yet. Add one below.
+          </div>
         ) : (
           <div className="mt-4 space-y-3">
             {cards.map((c) => (
               <div
-                key={`${c.brand}-${c.last4}-${c.exp_month}-${c.exp_year}`}
-                className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-xl border border-white/10 bg-black/20 p-4"
+                key={c._id}
+                className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
               >
-                <div className="text-sm">
-                  <div className="text-white/90 font-semibold">
-                    {c.brand || "Card"} •••• {c.last4}
-                    {c.isDefault ? (
-                      <span className="ml-2 text-xs text-emerald-300 font-semibold">
-                        DEFAULT
-                      </span>
-                    ) : null}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-white/80" />
                   </div>
-                  <div className="text-white/60 text-xs mt-1">
-                    Exp {c.exp_month}/{c.exp_year}
+
+                  <div>
+                    <div className="text-sm font-semibold text-white/90">
+                      {(c.brand || "CARD").toUpperCase()} •••• {c.last4}
+                    </div>
+                    <div className="text-xs text-white/60">
+                      Exp {String(c.expMonth).padStart(2, "0")}/{String(c.expYear).slice(-2)}
+                      {c.isDefault ? " • Default" : ""}
+                    </div>
                   </div>
                 </div>
 
@@ -395,18 +401,20 @@ function PaymentMethodsNoStripe({ bidIdFromRoute }) {
                   {!c.isDefault && (
                     <button
                       onClick={() => setDefault(c)}
-                      className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition text-xs font-semibold"
+                      disabled={busyId === c._id}
+                      className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition text-xs font-semibold disabled:opacity-50"
                     >
-                      Set Default
+                      {busyId === c._id && busyAction === "default" ? "Setting..." : "Set Default"}
                     </button>
                   )}
 
                   <button
                     onClick={() => deleteCard(c)}
-                    className="px-3 py-2 rounded-lg border border-red-400/20 bg-red-500/10 hover:bg-red-500/15 transition text-xs font-semibold text-red-200 flex items-center gap-2"
+                    disabled={busyId === c._id}
+                    className="px-3 py-2 rounded-lg border border-red-400/20 bg-red-500/10 hover:bg-red-500/15 transition text-xs font-semibold text-red-200 flex items-center gap-2 disabled:opacity-50"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Delete
+                    {busyId === c._id && busyAction === "delete" ? "Deleting..." : "Delete"}
                   </button>
                 </div>
               </div>
@@ -414,27 +422,61 @@ function PaymentMethodsNoStripe({ bidIdFromRoute }) {
           </div>
         )}
 
-        {bidIdFromRoute && (
-          <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
-            <div className="text-white/80 text-sm font-semibold">Pay Now</div>
-            <div className="mt-2 text-xs text-white/60">
-              Add Stripe key to enable paying from this page.
-            </div>
-            <button
-              onClick={() => navigate("/paymentmethods")}
-              className="mt-4 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold transition"
-            >
-              Go to Payment Methods
-            </button>
+        {globalErr ? <div className="mt-4 text-red-400 text-sm">{globalErr}</div> : null}
+
+        {/* Add Card note */}
+        <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
+          <div className="text-white/80 text-sm font-semibold">Add a new card</div>
+          <div className="mt-2 text-xs text-white/60">
+            Stripe is not available (missing publishable key). Add cards from a Stripe-enabled build.
           </div>
-        )}
+        </div>
       </div>
+
+      {/* Pay Now */}
+      {bidIdFromRoute && (
+        <>
+          <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
+            <div className="text-white/90 font-semibold">Pay Now</div>
+            <div className="mt-2 text-xs text-white/60">
+              You must have a default card saved to complete payment.
+            </div>
+
+            {payErr ? <div className="mt-3 text-red-400 text-sm">{payErr}</div> : null}
+            {payOk ? <div className="mt-3 text-emerald-300 text-sm">{payOk}</div> : null}
+
+            {/* Desktop button */}
+            <div className="mt-4 hidden md:block">
+              <button
+                onClick={payNow}
+                disabled={paying || summaryLoading || !bid || !request || !defaultCard}
+                className="w-full md:w-auto px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold transition disabled:opacity-50"
+              >
+                {paying ? "Processing..." : "Pay Now"}
+              </button>
+            </div>
+          </div>
+
+          {/* ✅ MOBILE FIX: fixed bottom bar so Pay button is ALWAYS visible */}
+          <div className="md:hidden fixed bottom-0 left-0 right-0 z-[9998] border-t border-white/10 bg-[#0b0a1c]/92 backdrop-blur-md">
+            <div className="max-w-5xl mx-auto px-4 pt-3 pb-[env(safe-area-inset-bottom)]">
+              <button
+                onClick={payNow}
+                disabled={paying || summaryLoading || !bid || !request || !defaultCard}
+                className="w-full h-12 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold transition disabled:opacity-50"
+              >
+                {paying ? "Processing..." : "Pay Now"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </PageShell>
   );
 }
 
 // -------------------------
-// STRIPE version (safe: only used inside <Elements>)
+// Stripe version (hooks allowed)
 // -------------------------
 function PaymentMethodsStripe({ bidIdFromRoute }) {
   const navigate = useNavigate();
@@ -445,156 +487,126 @@ function PaymentMethodsStripe({ bidIdFromRoute }) {
     cards,
     cardsLoading,
     cardsErr,
-    setCardsErr,
     loadCards,
+    defaultCard,
     bid,
     request,
     summaryLoading,
     summaryErr,
+    loadSummary,
   } = usePaymentData(bidIdFromRoute);
-
-  const defaultCard = useMemo(() => cards.find((c) => c.isDefault), [cards]);
 
   const [adding, setAdding] = useState(false);
   const [addErr, setAddErr] = useState("");
+
+  const [busyId, setBusyId] = useState("");
+  const [busyAction, setBusyAction] = useState("");
+  const [globalErr, setGlobalErr] = useState("");
 
   const [paying, setPaying] = useState(false);
   const [payErr, setPayErr] = useState("");
   const [payOk, setPayOk] = useState("");
 
-  const breakdown = useMemo(() => calcMerqnetTotals(bid?.totalPrice), [bid?.totalPrice]);
-
-  const setDefault = async (card) => {
-    if (!card?.last4) return;
-    setAddErr("");
-    setPayErr("");
-    setPayOk("");
-
-    try {
-      const res = await fetch(`${API}/api/payments/cards/${card.last4}/default`, {
-        method: "PATCH",
-        headers: authHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setCardsErr(data?.message || "Failed to set default card");
-        return;
-      }
-      await loadCards();
-    } catch {
-      setCardsErr("Network error setting default");
-    }
-  };
-
-  const deleteCard = async (card) => {
-    if (!card?.last4) return;
-    setAddErr("");
-    setPayErr("");
-    setPayOk("");
-
-    try {
-      const res = await fetch(`${API}/api/payments/cards/${card.last4}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setCardsErr(data?.message || "Failed to delete card");
-        return;
-      }
-      await loadCards();
-    } catch {
-      setCardsErr("Network error deleting card");
-    }
-  };
+  const totalCharged = useMemo(() => {
+    const t =
+      request?.wholeLotPrice ??
+      request?.total ??
+      bid?.totalPrice ??
+      bid?.price ??
+      0;
+    const n = Number(t);
+    if (!Number.isFinite(n)) return null;
+    return n * 1.06;
+  }, [bid, request]);
 
   const addCard = async () => {
-    setAddErr("");
-    setPayErr("");
-    setPayOk("");
-
-    if (!stripe || !elements) {
-      setAddErr("Stripe not ready.");
-      return;
-    }
-
-    const cardElement = elements.getElement(CardElement);
-    if (!cardElement) {
-      setAddErr("Card input not ready.");
-      return;
-    }
+    if (!stripe || !elements) return;
 
     try {
       setAdding(true);
+      setAddErr("");
 
-      const { token, error } = await stripe.createToken(cardElement);
-      if (error || !token?.id) {
-        setAddErr(error?.message || "Could not tokenize card.");
-        return;
-      }
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) throw new Error("Card input not ready");
 
-      const res = await fetch(`${API}/api/payments/cards`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ tokenId: token.id, makeDefault: true }),
+      // Create PM
+      const { error, paymentMethod } = await stripe.createPaymentMethod({
+        type: "card",
+        card: cardElement,
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setAddErr(data?.message || "Failed to add card");
-        return;
-      }
+      if (error) throw new Error(error.message);
 
-      cardElement.clear();
+      // Send PM to backend to attach + store
+      const res = await fetch(`${API_BASE}/api/payments/cards`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ paymentMethodId: paymentMethod.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Failed to add card");
+
       await loadCards();
-    } catch {
-      setAddErr("Network error adding card");
+      cardElement.clear();
+    } catch (e) {
+      setAddErr(e.message || "Failed to add card");
     } finally {
       setAdding(false);
     }
   };
 
-  const payNow = async () => {
-    setPayErr("");
-    setPayOk("");
-    setAddErr("");
-
-    if (!bidIdFromRoute) {
-      setPayErr("Missing bidId in route.");
-      return;
-    }
-
-    const reqId = bid?.requestId || request?._id;
-    if (!reqId) {
-      setPayErr("Missing requestId for this payment.");
-      return;
-    }
-
-    if (!defaultCard?.stripeSourceId) {
-      setPayErr("No default card set. Add a card and set it as default first.");
-      return;
-    }
-
+  const setDefault = async (card) => {
     try {
+      setGlobalErr("");
+      setBusyId(card._id);
+      setBusyAction("default");
+      await apiSetDefault(card);
+      await loadCards();
+    } catch (e) {
+      setGlobalErr(e.message || "Failed");
+    } finally {
+      setBusyId("");
+      setBusyAction("");
+    }
+  };
+
+  const deleteCard = async (card) => {
+    try {
+      setGlobalErr("");
+      setBusyId(card._id);
+      setBusyAction("delete");
+      await apiDeleteCard(card);
+      await loadCards();
+    } catch (e) {
+      setGlobalErr(e.message || "Failed");
+    } finally {
+      setBusyId("");
+      setBusyAction("");
+    }
+  };
+
+  const payNow = async () => {
+    if (!bidIdFromRoute) return;
+    try {
+      setPayErr("");
+      setPayOk("");
       setPaying(true);
 
-      const res = await fetch(`${API}/api/payments/pay`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ requestId: reqId, bidId: bidIdFromRoute }),
-      });
+      const data = await apiPay(bidIdFromRoute);
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPayErr(data?.message || "Payment failed");
+      const receiptId = data?.receiptId || data?.receipt?._id || data?.receipt?._id;
+      if (receiptId) {
+        navigate(`/receipt/${receiptId}`);
         return;
       }
 
-      setPayOk("Payment successful!");
-      const receiptId = data?.receiptId;
-      if (receiptId) navigate(`/receipt/${receiptId}`);
-    } catch {
-      setPayErr("Network error processing payment");
+      setPayOk("Payment completed.");
+      await loadSummary();
+    } catch (e) {
+      setPayErr(e.message || "Payment failed");
     } finally {
       setPaying(false);
     }
@@ -602,107 +614,85 @@ function PaymentMethodsStripe({ bidIdFromRoute }) {
 
   return (
     <PageShell
-      title={bidIdFromRoute ? "Proceed to Payment" : "Payment Methods"}
-      subtitle={
-        bidIdFromRoute
-          ? "Confirm your card and pay for the accepted bid."
-          : "Manage your saved cards."
-      }
+      title="Payment Methods"
+      subtitle="Add a card and set a default payment method."
     >
       {/* Summary */}
-      {bidIdFromRoute && (
+      {bidIdFromRoute ? (
         <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
-          <div className="flex items-center gap-2 text-white/85 font-semibold">
-            <CheckCircle2 className="w-5 h-5 text-emerald-300" />
-            Payment Summary
-          </div>
+          <div className="text-white/90 font-semibold">Payment Summary</div>
 
           {summaryLoading ? (
-            <div className="mt-4 text-white/60 flex items-center gap-2">
+            <div className="mt-4 text-white/70 flex items-center gap-2 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
               Loading summary...
             </div>
           ) : summaryErr ? (
-            <div className="mt-4 text-red-400">{summaryErr}</div>
+            <div className="mt-4 text-red-400 text-sm">{summaryErr}</div>
           ) : (
-            <div className="mt-4 grid md:grid-cols-2 gap-4 text-sm">
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-white/60 text-xs">Bid</div>
-                <div className="mt-1 text-white/90 font-semibold break-all">
-                  {bid?._id || bidIdFromRoute}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="text-xs text-white/60">Product</div>
+                <div className="mt-1 text-sm font-semibold text-white/90">
+                  {request?.productName || "N/A"}
                 </div>
-
-                {/* ✅ Breakdown */}
-                <div className="mt-3 text-white/60 text-xs">Subtotal</div>
-                <div className="mt-1 text-white/90 font-semibold">
-                  ${formatMoney(breakdown.subtotal)}
-                </div>
-
-                <div className="mt-3 text-white/60 text-xs">MerqNet Fee (6%)</div>
-                <div className="mt-1 text-fuchsia-200 font-semibold">
-                  ${formatMoney(breakdown.fee)}
-                </div>
-
-                <div className="mt-3 text-white/60 text-xs">Total Charged</div>
-                <div className="mt-1 text-orange-200 font-bold text-lg">
-                  ${formatMoney(breakdown.total)}
-                </div>
-
-                <div className="mt-3 text-white/60 text-xs">Delivery</div>
-                <div className="mt-1 text-white/85">{bid?.deliveryTime || "—"}</div>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-white/60 text-xs">Request</div>
-                <div className="mt-1 text-white/90 font-semibold break-all">
-                  {request?._id || bid?.requestId || "—"}
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="text-xs text-white/60">Total Charged (incl. 6% MerqNet fee)</div>
+                <div className="mt-1 text-sm font-semibold text-emerald-300">
+                  {totalCharged != null ? `USD ${money(totalCharged.toFixed(2))}` : "N/A"}
                 </div>
-                <div className="mt-3 text-white/60 text-xs">Product</div>
-                <div className="mt-1 text-white/85">
-                  {request?.productName || request?.title || "—"}
-                </div>
-                <div className="mt-3 text-white/60 text-xs">Category</div>
-                <div className="mt-1 text-white/85">{request?.category || "—"}</div>
               </div>
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
-      {/* Cards + Add */}
+      {/* Cards */}
       <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
-        <div className="flex items-center gap-2 text-white/90 font-semibold">
-          <CreditCard className="w-5 h-5 text-cyan-200" />
-          Saved Cards
+        <div className="flex items-center justify-between">
+          <div className="text-white/90 font-semibold">Saved Cards</div>
+
+          <button
+            onClick={loadCards}
+            className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition text-xs font-semibold"
+          >
+            Refresh
+          </button>
         </div>
 
         {cardsLoading ? (
-          <div className="mt-4 text-white/60 flex items-center gap-2">
+          <div className="mt-4 text-white/70 flex items-center gap-2 text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
             Loading cards...
           </div>
         ) : cardsErr ? (
-          <div className="mt-4 text-red-400">{cardsErr}</div>
+          <div className="mt-4 text-red-400 text-sm">{cardsErr}</div>
         ) : cards.length === 0 ? (
-          <div className="mt-4 text-white/60">No cards saved yet.</div>
+          <div className="mt-4 text-white/65 text-sm">
+            No cards yet. Add one below.
+          </div>
         ) : (
           <div className="mt-4 space-y-3">
             {cards.map((c) => (
               <div
-                key={`${c.brand}-${c.last4}-${c.exp_month}-${c.exp_year}`}
-                className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-xl border border-white/10 bg-black/20 p-4"
+                key={c._id}
+                className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
               >
-                <div className="text-sm">
-                  <div className="text-white/90 font-semibold">
-                    {c.brand || "Card"} •••• {c.last4}
-                    {c.isDefault ? (
-                      <span className="ml-2 text-xs text-emerald-300 font-semibold">
-                        DEFAULT
-                      </span>
-                    ) : null}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                    <CreditCard className="w-5 h-5 text-white/80" />
                   </div>
-                  <div className="text-white/60 text-xs mt-1">
-                    Exp {c.exp_month}/{c.exp_year}
+
+                  <div>
+                    <div className="text-sm font-semibold text-white/90">
+                      {(c.brand || "CARD").toUpperCase()} •••• {c.last4}
+                    </div>
+                    <div className="text-xs text-white/60">
+                      Exp {String(c.expMonth).padStart(2, "0")}/{String(c.expYear).slice(-2)}
+                      {c.isDefault ? " • Default" : ""}
+                    </div>
                   </div>
                 </div>
 
@@ -710,24 +700,28 @@ function PaymentMethodsStripe({ bidIdFromRoute }) {
                   {!c.isDefault && (
                     <button
                       onClick={() => setDefault(c)}
-                      className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition text-xs font-semibold"
+                      disabled={busyId === c._id}
+                      className="px-3 py-2 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition text-xs font-semibold disabled:opacity-50"
                     >
-                      Set Default
+                      {busyId === c._id && busyAction === "default" ? "Setting..." : "Set Default"}
                     </button>
                   )}
 
                   <button
                     onClick={() => deleteCard(c)}
-                    className="px-3 py-2 rounded-lg border border-red-400/20 bg-red-500/10 hover:bg-red-500/15 transition text-xs font-semibold text-red-200 flex items-center gap-2"
+                    disabled={busyId === c._id}
+                    className="px-3 py-2 rounded-lg border border-red-400/20 bg-red-500/10 hover:bg-red-500/15 transition text-xs font-semibold text-red-200 flex items-center gap-2 disabled:opacity-50"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Delete
+                    {busyId === c._id && busyAction === "delete" ? "Deleting..." : "Delete"}
                   </button>
                 </div>
               </div>
             ))}
           </div>
         )}
+
+        {globalErr ? <div className="mt-4 text-red-400 text-sm">{globalErr}</div> : null}
 
         {/* Add Card */}
         <div className="mt-6 rounded-xl border border-white/10 bg-black/20 p-4">
@@ -761,23 +755,41 @@ function PaymentMethodsStripe({ bidIdFromRoute }) {
 
       {/* Pay Now */}
       {bidIdFromRoute && (
-        <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
-          <div className="text-white/90 font-semibold">Pay Now</div>
-          <div className="mt-2 text-xs text-white/60">
-            You must have a default card saved to complete payment.
+        <>
+          <div className="rounded-2xl border border-white/20 bg-[#0b0a1c]/88 backdrop-blur-md p-6">
+            <div className="text-white/90 font-semibold">Pay Now</div>
+            <div className="mt-2 text-xs text-white/60">
+              You must have a default card saved to complete payment.
+            </div>
+
+            {payErr ? <div className="mt-3 text-red-400 text-sm">{payErr}</div> : null}
+            {payOk ? <div className="mt-3 text-emerald-300 text-sm">{payOk}</div> : null}
+
+            {/* Desktop button */}
+            <div className="mt-4 hidden md:block">
+              <button
+                onClick={payNow}
+                disabled={paying || summaryLoading || !bid || !request}
+                className="w-full md:w-auto px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold transition disabled:opacity-50"
+              >
+                {paying ? "Processing..." : "Pay Now"}
+              </button>
+            </div>
           </div>
 
-          {payErr ? <div className="mt-3 text-red-400 text-sm">{payErr}</div> : null}
-          {payOk ? <div className="mt-3 text-emerald-300 text-sm">{payOk}</div> : null}
-
-          <button
-            onClick={payNow}
-            disabled={paying || summaryLoading || !bid || !request}
-            className="mt-4 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold transition disabled:opacity-50"
-          >
-            {paying ? "Processing..." : "Pay Now"}
-          </button>
-        </div>
+          {/* ✅ MOBILE FIX: fixed bottom bar so Pay button is ALWAYS visible */}
+          <div className="md:hidden fixed bottom-0 left-0 right-0 z-[9998] border-t border-white/10 bg-[#0b0a1c]/92 backdrop-blur-md">
+            <div className="max-w-5xl mx-auto px-4 pt-3 pb-[env(safe-area-inset-bottom)]">
+              <button
+                onClick={payNow}
+                disabled={paying || summaryLoading || !bid || !request}
+                className="w-full h-12 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-black font-semibold transition disabled:opacity-50"
+              >
+                {paying ? "Processing..." : "Pay Now"}
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </PageShell>
   );
