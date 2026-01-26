@@ -46,6 +46,7 @@ async function ensureLocalDefaultCard(user) {
 
   let def = user.cards.find((c) => c.isDefault) || null;
 
+  // If none marked default, force first as default (keeps old behavior stable)
   if (!def) {
     user.cards.forEach((c, i) => (c.isDefault = i === 0));
     await user.save();
@@ -61,12 +62,14 @@ async function ensureLocalDefaultCard(user) {
 exports.getCards = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
-    if (!userId)
+    if (!userId) {
       return res.status(401).json({ message: "Unauthorized", cards: [] });
+    }
 
     const user = await User.findById(userId).select("cards");
-    if (!user)
+    if (!user) {
       return res.status(404).json({ message: "User not found", cards: [] });
+    }
 
     const cards = Array.isArray(user.cards) ? user.cards : [];
     return res.status(200).json({ cards });
@@ -78,6 +81,7 @@ exports.getCards = async (req, res) => {
 
 // -----------------------------
 // ADD CARD (Frontend sends { paymentMethodId: "pm_..." })
+// IMPORTANT: Save fields matching User.js schema (exp_month / exp_year).
 // -----------------------------
 exports.addCard = async (req, res) => {
   try {
@@ -88,47 +92,59 @@ exports.addCard = async (req, res) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { paymentMethodId } = req.body || {};
-    if (!paymentMethodId)
+    if (!paymentMethodId) {
       return res.status(400).json({ message: "Missing paymentMethodId" });
+    }
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const customerId = await ensureStripeCustomer(user, stripe);
 
+    // Attach PM to customer (safe if already attached)
     try {
-      await stripe.paymentMethods.attach(paymentMethodId, {
-        customer: customerId,
-      });
+      await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
     } catch (e) {
       const msg = String(e?.message || "");
       if (!msg.toLowerCase().includes("already")) {
         console.error("attach paymentMethod error:", e);
-        return res
-          .status(400)
-          .json({ message: "Failed to attach payment method" });
+        return res.status(400).json({ message: "Failed to attach payment method" });
       }
     }
 
     const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
     const card = pm?.card || {};
-    const brand = card?.brand ? String(card.brand).toUpperCase() : "CARD";
+
+    const brand = card?.brand ? String(card.brand) : "";
     const last4 = card?.last4 || "----";
-    const expMonth = card?.exp_month ?? null;
-    const expYear = card?.exp_year ?? null;
+    const exp_month = card?.exp_month ?? null;
+    const exp_year = card?.exp_year ?? null;
 
     if (!Array.isArray(user.cards)) user.cards = [];
 
+    // Avoid duplicates by last4+brand+exp (lo más seguro con schema legacy)
     const exists = user.cards.some(
-      (c) => c.stripePaymentMethodId === paymentMethodId
+      (c) =>
+        String(c.last4) === String(last4) &&
+        String(c.brand).toLowerCase() === String(brand).toLowerCase() &&
+        Number(c.exp_month) === Number(exp_month) &&
+        Number(c.exp_year) === Number(exp_year)
     );
+
     if (!exists) {
       user.cards.push({
-        stripePaymentMethodId: paymentMethodId,
         brand,
         last4,
-        expMonth,
-        expYear,
+        exp_month,
+        exp_year,
+
+        // Legacy schema has stripeSourceId; keep it empty for pm_ cards.
+        stripeSourceId: "",
+
+        // If your schema later includes this field, it will persist.
+        // If not, Mongo/Mongoose will ignore it (no break).
+        stripePaymentMethodId: paymentMethodId,
+
         isDefault: user.cards.length === 0,
       });
     }
@@ -145,6 +161,10 @@ exports.addCard = async (req, res) => {
 
 // -----------------------------
 // SET DEFAULT CARD
+// Supports BOTH:
+// - { stripePaymentMethodId: "pm_..." }
+// - { stripeSourceId: "card_..." }
+// - { cardId: "<mongo card _id>" }  (optional safe fallback)
 // -----------------------------
 exports.setDefaultCard = async (req, res) => {
   try {
@@ -154,31 +174,47 @@ exports.setDefaultCard = async (req, res) => {
     const userId = getAuthUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
-    const { stripePaymentMethodId } = req.body || {};
-    if (!stripePaymentMethodId)
-      return res.status(400).json({ message: "Missing stripePaymentMethodId" });
+    const { stripePaymentMethodId, stripeSourceId, cardId } = req.body || {};
+
+    if (!stripePaymentMethodId && !stripeSourceId && !cardId) {
+      return res.status(400).json({
+        message: "Missing stripePaymentMethodId or stripeSourceId or cardId",
+      });
+    }
 
     const user = await User.findById(userId);
-    if (!user || !Array.isArray(user.cards))
+    if (!user || !Array.isArray(user.cards)) {
       return res.status(404).json({ message: "User or cards not found" });
+    }
 
-    const target = user.cards.find(
-      (c) => c.stripePaymentMethodId === stripePaymentMethodId
-    );
+    const target = user.cards.find((c) => {
+      if (cardId && String(c._id) === String(cardId)) return true;
+      if (stripePaymentMethodId && c.stripePaymentMethodId === stripePaymentMethodId) return true;
+      if (stripeSourceId && c.stripeSourceId === stripeSourceId) return true;
+      return false;
+    });
+
     if (!target) return res.status(404).json({ message: "Card not found" });
 
     user.cards.forEach((c) => (c.isDefault = false));
     target.isDefault = true;
     await user.save();
 
-    const customerId = await ensureStripeCustomer(user, stripe);
+    // Only update Stripe invoice default if we have a pm_ id
+    const pmId =
+      target.stripePaymentMethodId && String(target.stripePaymentMethodId).startsWith("pm_")
+        ? target.stripePaymentMethodId
+        : "";
 
-    try {
-      await stripe.customers.update(customerId, {
-        invoice_settings: { default_payment_method: stripePaymentMethodId },
-      });
-    } catch (e) {
-      console.error("stripe set default PM error:", e);
+    if (pmId) {
+      const customerId = await ensureStripeCustomer(user, stripe);
+      try {
+        await stripe.customers.update(customerId, {
+          invoice_settings: { default_payment_method: pmId },
+        });
+      } catch (e) {
+        console.error("stripe set default PM error:", e);
+      }
     }
 
     return res.status(200).json({ message: "Default card updated" });
@@ -203,8 +239,9 @@ exports.deleteCard = async (req, res) => {
     if (!id) return res.status(400).json({ message: "Missing card id" });
 
     const user = await User.findById(userId);
-    if (!user || !Array.isArray(user.cards))
+    if (!user || !Array.isArray(user.cards)) {
       return res.status(404).json({ message: "User or cards not found" });
+    }
 
     const idx = user.cards.findIndex((c) => String(c._id) === id);
     if (idx === -1) return res.status(404).json({ message: "Card not found" });
@@ -212,12 +249,14 @@ exports.deleteCard = async (req, res) => {
     const removed = user.cards[idx];
     user.cards.splice(idx, 1);
 
+    // Keep a default card if any remain
     if (removed?.isDefault && user.cards.length > 0) {
       user.cards.forEach((c, i) => (c.isDefault = i === 0));
     }
 
     await user.save();
 
+    // If it was a pm_ card, detach from Stripe customer (safe if already detached)
     try {
       if (user.stripeCustomerId && removed?.stripePaymentMethodId) {
         await stripe.paymentMethods.detach(removed.stripePaymentMethodId);
@@ -249,8 +288,9 @@ exports.getSummary = async (req, res) => {
     if (!request) return res.status(404).json({ message: "Request not found" });
 
     const buyerId = request.clientID || request.clientId;
-    if (String(buyerId) !== String(userId))
+    if (String(buyerId) !== String(userId)) {
       return res.status(403).json({ message: "Forbidden" });
+    }
 
     return res.status(200).json({ bid, request });
   } catch (err) {
@@ -261,6 +301,9 @@ exports.getSummary = async (req, res) => {
 
 // -----------------------------
 // PAY NOW
+// - Uses pm_ (PaymentIntents) if available
+// - Uses card_ (Charges legacy) if available
+// - NEVER blocks a valid legacy card_
 // -----------------------------
 exports.payNow = async (req, res) => {
   try {
@@ -283,27 +326,43 @@ exports.payNow = async (req, res) => {
     if (!request) return res.status(404).json({ message: "Request not found" });
 
     const buyerId = request.clientID || request.clientId;
-    if (String(buyerId) !== String(user._id))
+    if (String(buyerId) !== String(user._id)) {
       return res.status(403).json({ message: "Forbidden: only buyer can pay" });
+    }
 
-    if (!bid.accepted)
+    if (!bid.accepted) {
       return res.status(400).json({ message: "Bid is not accepted" });
+    }
 
     const existingReceipt = await Receipt.findOne({
       bidId: bid._id,
       status: "paid",
     });
-    if (existingReceipt)
+
+    if (existingReceipt) {
       return res.status(200).json({
         message: "Already paid",
         receiptId: existingReceipt.receiptId,
       });
+    }
 
     const def = await ensureLocalDefaultCard(user);
 
-    // ✅ NO invento: esto refleja tu DB real (pm_ NUEVO o card_ VIEJO)
-    const paymentMethodId = def?.stripePaymentMethodId || "";
-    const sourceId = def?.stripeSourceId || "";
+    // Read both possible ids
+    let paymentMethodId = def?.stripePaymentMethodId || "";
+    let sourceId = def?.stripeSourceId || "";
+
+    // Safety: if someone stored pm_ inside stripeSourceId, normalize
+    if (!paymentMethodId && sourceId && String(sourceId).startsWith("pm_")) {
+      paymentMethodId = sourceId;
+      sourceId = "";
+    }
+
+    // Safety: if someone stored card_ inside stripePaymentMethodId, normalize
+    if (!sourceId && paymentMethodId && String(paymentMethodId).startsWith("card_")) {
+      sourceId = paymentMethodId;
+      paymentMethodId = "";
+    }
 
     if (!paymentMethodId && !sourceId) {
       return res.status(400).json({ message: "No default card set" });
@@ -311,25 +370,23 @@ exports.payNow = async (req, res) => {
 
     const customerId = await ensureStripeCustomer(user, stripe);
 
-    // Charge total = bid.totalPrice + 6% fee
+    // Amount = bid.totalPrice + 6% fee
     const subtotal = Number(bid.totalPrice);
-    if (!Number.isFinite(subtotal) || subtotal <= 0)
+    if (!Number.isFinite(subtotal) || subtotal <= 0) {
       return res.status(400).json({ message: "Invalid bid total price" });
+    }
 
     const merqnetFee = Number((subtotal * 0.06).toFixed(2));
     const totalToCharge = Number((subtotal + merqnetFee).toFixed(2));
     const amountCents = Math.round(totalToCharge * 100);
 
-    // --- Payment execution (DUAL) ---
-    let paidId = null; // PaymentIntent id OR Charge id
+    let paidId = null;       // PaymentIntent id OR Charge id
     let usedMethodId = null; // pm_... OR card_...
 
     if (paymentMethodId) {
-      // NEW: PaymentMethods (pm_...) + PaymentIntents
+      // NEW: pm_ via PaymentIntents
       try {
-        await stripe.paymentMethods.attach(paymentMethodId, {
-          customer: customerId,
-        });
+        await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
       } catch (_) {}
 
       const pi = await stripe.paymentIntents.create({
@@ -348,7 +405,7 @@ exports.payNow = async (req, res) => {
       paidId = pi.id;
       usedMethodId = paymentMethodId;
     } else {
-      // LEGACY: Sources (card_...) + Charges (the old working path)
+      // LEGACY: card_ via Charges (THIS IS WHAT YOUR DB HAS)
       const ch = await stripe.charges.create({
         amount: amountCents,
         currency: "usd",
@@ -374,6 +431,7 @@ exports.payNow = async (req, res) => {
       usedMethodId = sourceId;
     }
 
+    // Keep existing field names so you don't break anything downstream
     const receiptDoc = await Receipt.create({
       receiptId: makeReceiptId(),
       requestId: request._id,
@@ -383,7 +441,6 @@ exports.payNow = async (req, res) => {
       amount: totalToCharge,
       currency: "usd",
 
-      // Keep existing field names to avoid breaking anything
       stripePaymentIntentId: paidId,
       stripePaymentMethodId: usedMethodId,
 
@@ -398,8 +455,8 @@ exports.payNow = async (req, res) => {
     });
   } catch (err) {
     console.error("payNow error:", err);
-    return res
-      .status(500)
-      .json({ message: String(err?.message || "Payment failed") });
+    return res.status(500).json({
+      message: String(err?.message || "Payment failed"),
+    });
   }
 };
