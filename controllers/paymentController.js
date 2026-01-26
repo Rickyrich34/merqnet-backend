@@ -301,21 +301,17 @@ exports.payNow = async (req, res) => {
 
     const def = await ensureLocalDefaultCard(user);
 
-    // ✅ COMPATIBILIDAD VIEJA + NUEVA
-    const pmId =
-      def?.stripePaymentMethodId ||
-      def?.stripeSourceId ||
-      "";
+    // ✅ NO invento: esto refleja tu DB real (pm_ NUEVO o card_ VIEJO)
+    const paymentMethodId = def?.stripePaymentMethodId || "";
+    const sourceId = def?.stripeSourceId || "";
 
-    if (!pmId)
+    if (!paymentMethodId && !sourceId) {
       return res.status(400).json({ message: "No default card set" });
+    }
 
     const customerId = await ensureStripeCustomer(user, stripe);
 
-    try {
-      await stripe.paymentMethods.attach(pmId, { customer: customerId });
-    } catch (_) {}
-
+    // Charge total = bid.totalPrice + 6% fee
     const subtotal = Number(bid.totalPrice);
     if (!Number.isFinite(subtotal) || subtotal <= 0)
       return res.status(400).json({ message: "Invalid bid total price" });
@@ -324,17 +320,59 @@ exports.payNow = async (req, res) => {
     const totalToCharge = Number((subtotal + merqnetFee).toFixed(2));
     const amountCents = Math.round(totalToCharge * 100);
 
-    const pi = await stripe.paymentIntents.create({
-      amount: amountCents,
-      currency: "usd",
-      customer: customerId,
-      payment_method: pmId,
-      confirm: true,
-      off_session: true,
-    });
+    // --- Payment execution (DUAL) ---
+    let paidId = null; // PaymentIntent id OR Charge id
+    let usedMethodId = null; // pm_... OR card_...
 
-    if (pi.status !== "succeeded")
-      return res.status(400).json({ message: "Payment did not succeed" });
+    if (paymentMethodId) {
+      // NEW: PaymentMethods (pm_...) + PaymentIntents
+      try {
+        await stripe.paymentMethods.attach(paymentMethodId, {
+          customer: customerId,
+        });
+      } catch (_) {}
+
+      const pi = await stripe.paymentIntents.create({
+        amount: amountCents,
+        currency: "usd",
+        customer: customerId,
+        payment_method: paymentMethodId,
+        confirm: true,
+        off_session: true,
+      });
+
+      if (pi.status !== "succeeded") {
+        return res.status(400).json({ message: "Payment did not succeed" });
+      }
+
+      paidId = pi.id;
+      usedMethodId = paymentMethodId;
+    } else {
+      // LEGACY: Sources (card_...) + Charges (the old working path)
+      const ch = await stripe.charges.create({
+        amount: amountCents,
+        currency: "usd",
+        customer: customerId,
+        source: sourceId,
+        description: `MerqNet payment | request ${request._id} | bid ${bid._id}`,
+        metadata: {
+          requestId: String(request._id),
+          bidId: String(bid._id),
+          buyerId: String(user._id),
+          sellerId: String(bid.sellerId),
+          subtotal: String(subtotal),
+          merqnetFee: String(merqnetFee),
+          totalCharged: String(totalToCharge),
+        },
+      });
+
+      if (ch.status !== "succeeded") {
+        return res.status(400).json({ message: "Payment did not succeed" });
+      }
+
+      paidId = ch.id;
+      usedMethodId = sourceId;
+    }
 
     const receiptDoc = await Receipt.create({
       receiptId: makeReceiptId(),
@@ -344,8 +382,11 @@ exports.payNow = async (req, res) => {
       sellerId: bid.sellerId,
       amount: totalToCharge,
       currency: "usd",
-      stripePaymentIntentId: pi.id,
-      stripePaymentMethodId: pmId,
+
+      // Keep existing field names to avoid breaking anything
+      stripePaymentIntentId: paidId,
+      stripePaymentMethodId: usedMethodId,
+
       status: "paid",
       viewedByBuyer: true,
       viewedBySeller: false,
@@ -357,6 +398,8 @@ exports.payNow = async (req, res) => {
     });
   } catch (err) {
     console.error("payNow error:", err);
-    return res.status(500).json({ message: String(err?.message || "Payment failed") });
+    return res
+      .status(500)
+      .json({ message: String(err?.message || "Payment failed") });
   }
 };
