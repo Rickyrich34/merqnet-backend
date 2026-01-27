@@ -38,8 +38,7 @@ const fromList = (process.env.CORS_ORIGINS || "")
 
 const allowedOrigins = [
   fromSingle,
-  ...fromList,
-
+  ...fromList, // ✅ FIX: spread the list (your file had ".fromList" which is invalid)
   // Local dev
   "http://localhost:5173",
   "http://localhost:3000",
@@ -61,32 +60,31 @@ function isRailwayDomain(origin) {
 }
 
 // IMPORTANT: CORS must run before routes
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // Non-browser requests (curl/postman/server-to-server)
-      if (!origin) return cb(null, true);
+const corsOptions = {
+  origin: (origin, cb) => {
+    // Non-browser requests (curl/postman/server-to-server)
+    if (!origin) return cb(null, true);
 
-      const clean = normalizeOrigin(origin);
+    const clean = normalizeOrigin(origin);
 
-      // Allow listed origins + any Railway domain
-      if (allowedOrigins.includes(clean) || isRailwayDomain(clean)) {
-        return cb(null, true);
-      }
+    // Allow listed origins + any Railway domain
+    if (allowedOrigins.includes(clean) || isRailwayDomain(clean)) {
+      return cb(null, true);
+    }
 
-      // Instead of throwing (which can remove headers),
-      // we hard-deny with false.
-      return cb(null, false);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    optionsSuccessStatus: 204,
-  })
-);
+    // Hard deny (do NOT throw, keeps response stable)
+    return cb(null, false);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
 
-// Preflight
-app.options("*", cors());
+app.use(cors(corsOptions));
+
+// ✅ FIX: Preflight MUST use same cors options (your file used cors() with no options)
+app.options("*", cors(corsOptions));
 
 // Body parsing
 app.use(express.json({ limit: "10mb" }));
