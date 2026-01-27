@@ -7,91 +7,129 @@ const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-/* ================================
-   CORS CONFIG (PRODUCTION SAFE)
-================================ */
+// Railway proxy support (safe for cookies / headers / https behind proxy)
+app.set("trust proxy", 1);
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "https://merqnet-frontend-production.up.railway.app"
-];
-
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
+/**
+ * CORS
+ * - Allows localhost dev (5173/3000)
+ * - Allows your Railway frontend domain(s)
+ * - Allows custom domains
+ * - Echoes the request Origin (so credentials can work)
+ *
+ * Env options supported:
+ * - FRONTEND_URL (single origin)
+ * - CORS_ORIGIN  (single origin)
+ * - CORS_ORIGINS (comma-separated origins)
+ */
+function normalizeOrigin(o) {
+  if (!o || typeof o !== "string") return "";
+  return o.trim().replace(/\/$/, "");
 }
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow server-to-server or Postman
-    if (!origin) return callback(null, true);
+const fromSingle =
+  normalizeOrigin(process.env.FRONTEND_URL) ||
+  normalizeOrigin(process.env.CORS_ORIGIN);
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+const fromList = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
-    console.log("❌ Blocked by CORS:", origin);
-    return callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-};
+const allowedOrigins = [
+  fromSingle,
+  ...fromList,
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+  // Local dev
+  "http://localhost:5173",
+  "http://localhost:3000",
 
-/* ================================
-   MIDDLEWARES
-================================ */
+  // Your known domains (adjust if needed)
+  "https://merqnet-frontend-production.up.railway.app",
+  "https://app.merqnet.com",
+  "https://merqnet.com",
+  "https://www.merqnet.com",
+].filter(Boolean);
 
-app.use(express.json());
+function isRailwayDomain(origin) {
+  try {
+    const u = new URL(origin);
+    return u.protocol === "https:" && u.hostname.endsWith(".up.railway.app");
+  } catch {
+    return false;
+  }
+}
+
+// IMPORTANT: CORS must run before routes
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // Non-browser requests (curl/postman/server-to-server)
+      if (!origin) return cb(null, true);
+
+      const clean = normalizeOrigin(origin);
+
+      // Allow listed origins + any Railway domain
+      if (allowedOrigins.includes(clean) || isRailwayDomain(clean)) {
+        return cb(null, true);
+      }
+
+      // Instead of throwing (which can remove headers),
+      // we hard-deny with false.
+      return cb(null, false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
+  })
+);
+
+// Preflight
+app.options("*", cors());
+
+// Body parsing
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-/* ================================
-   ROUTES
-================================ */
+// Mongo (support both var names)
+const MONGO_URI =
+  process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL;
 
-// Example:
-// app.use("/api/users", require("./routes/users"));
-// app.use("/api/payments", require("./routes/payments"));
-// app.use("/api/bids", require("./routes/bids"));
-// app.use("/api/requests", require("./routes/requests"));
+if (!MONGO_URI) {
+  console.error(
+    "❌ Missing Mongo connection string. Set MONGODB_URI (or MONGO_URI)."
+  );
+} else {
+  mongoose
+    .connect(MONGO_URI)
+    .then(() => console.log("✅ Connected to MongoDB"))
+    .catch((err) => console.error("❌ MongoDB connection error:", err));
+}
 
-/* ================================
-   DATABASE
-================================ */
+// ROUTES — keep existing
+app.use("/api/users", require("./routes/userRoutes"));
+app.use("/api/products", require("./routes/productRoutes"));
+app.use("/api/profile", require("./routes/profileRoutes"));
+app.use("/api/requests", require("./routes/requestRoutes"));
+app.use("/api/bids", require("./routes/bidRoutes"));
+app.use("/api/payments", require("./routes/paymentRoutes"));
+app.use("/api/receipts", require("./routes/receiptRoutes"));
+app.use("/api/dashboard", require("./routes/dashboardRoutes"));
+app.use("/api/matches", require("./routes/matchRoutes"));
+app.use("/api/messages", require("./routes/messageRoutes"));
+app.use("/api/notifications", require("./routes/notificationRoutes"));
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ MongoDB error:", err.message));
-
-/* ================================
-   HEALTH CHECK
-================================ */
-
+// ROOT TEST
 app.get("/", (req, res) => {
-  res.json({ status: "OK", service: "MerqNet Backend" });
+  res.send("MerqNet API is running.");
 });
 
-/* ================================
-   ERROR HANDLER (CORS + API)
-================================ */
-
-app.use((err, req, res, next) => {
-  console.error("🔥 Server Error:", err.message);
-  res.status(500).json({
-    error: err.message || "Internal Server Error"
-  });
+// 404
+app.use((req, res) => {
+  res.status(404).json({ message: "Route not found" });
 });
-
-/* ================================
-   START SERVER
-================================ */
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log("🌍 Allowed origins:");
-  allowedOrigins.forEach((o) => console.log("   -", o));
+  console.log(`✅ Server running on port ${PORT}`);
 });
