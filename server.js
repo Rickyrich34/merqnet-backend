@@ -7,115 +7,91 @@ const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-/**
- * CORS (Railway + Custom Domains)
- *
- * Supports:
- * - FRONTEND_URL (single origin)
- * - CORS_ORIGIN  (single origin)
- * - CORS_ORIGINS (comma-separated list)
- *
- * Allows Railway preview domains: https://*.up.railway.app
- */
-
-function normalizeOrigin(o) {
-  if (!o || typeof o !== "string") return "";
-  return o.trim().replace(/\/$/, "");
-}
-
-const fromSingle =
-  normalizeOrigin(process.env.FRONTEND_URL) ||
-  normalizeOrigin(process.env.CORS_ORIGIN);
-
-const fromList = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map(normalizeOrigin)
-  .filter(Boolean);
+/* ================================
+   CORS CONFIG (PRODUCTION SAFE)
+================================ */
 
 const allowedOrigins = [
-  fromSingle,
-  ...fromList, // ✅ FIX REAL (spread)
-
-  // local dev
   "http://localhost:5173",
-  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  "https://merqnet-frontend-production.up.railway.app"
+];
 
-  // production domains
-  "https://app.merqnet.com",
-  "https://merqnet.com",
-  "https://www.merqnet.com",
-].filter(Boolean);
-
-function isRailwayFrontend(origin) {
-  try {
-    const u = new URL(origin);
-    return u.protocol === "https:" && u.hostname.endsWith(".up.railway.app");
-  } catch {
-    return false;
-  }
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow server-to-server or Postman
     if (!origin) return callback(null, true);
 
-    const clean = normalizeOrigin(origin);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-    if (allowedOrigins.includes(clean)) return callback(null, true);
-    if (isRailwayFrontend(clean)) return callback(null, true);
-
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    console.log("❌ Blocked by CORS:", origin);
+    return callback(new Error("Not allowed by CORS"));
   },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
-  optionsSuccessStatus: 204,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 };
 
-// CORS first
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-app.use(express.json({ limit: "10mb" }));
+/* ================================
+   MIDDLEWARES
+================================ */
+
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Railway proxy
-app.set("trust proxy", 1);
+/* ================================
+   ROUTES
+================================ */
 
-// Mongo
+// Example:
+// app.use("/api/users", require("./routes/users"));
+// app.use("/api/payments", require("./routes/payments"));
+// app.use("/api/bids", require("./routes/bids"));
+// app.use("/api/requests", require("./routes/requests"));
+
+/* ================================
+   DATABASE
+================================ */
+
 mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => console.log("✅ Connected to MongoDB"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => console.error("❌ MongoDB error:", err.message));
 
-// Routes (no tocadas)
-app.use("/api/users", require("./routes/userRoutes"));
-app.use("/api/products", require("./routes/productRoutes"));
-app.use("/api/profile", require("./routes/profileRoutes"));
-app.use("/api/requests", require("./routes/requestRoutes"));
-app.use("/api/bids", require("./routes/bidRoutes"));
-app.use("/api/payments", require("./routes/paymentRoutes"));
-app.use("/api/receipts", require("./routes/receiptRoutes"));
-app.use("/api/dashboard", require("./routes/dashboardRoutes"));
-app.use("/api/matches", require("./routes/matchRoutes"));
-app.use("/api/messages", require("./routes/messageRoutes"));
-app.use("/api/notifications", require("./routes/notificationRoutes"));
+/* ================================
+   HEALTH CHECK
+================================ */
 
-// Root test
 app.get("/", (req, res) => {
-  res.send("MerqNet API is running.");
+  res.json({ status: "OK", service: "MerqNet Backend" });
 });
 
-// CORS error visibility
+/* ================================
+   ERROR HANDLER (CORS + API)
+================================ */
+
 app.use((err, req, res, next) => {
-  if (err && String(err.message || "").toLowerCase().includes("cors")) {
-    return res.status(403).json({ error: err.message });
-  }
-  return next(err);
+  console.error("🔥 Server Error:", err.message);
+  res.status(500).json({
+    error: err.message || "Internal Server Error"
+  });
 });
 
-// Server
+/* ================================
+   START SERVER
+================================ */
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log("✅ Allowed Origins:", allowedOrigins);
+  console.log("🌍 Allowed origins:");
+  allowedOrigins.forEach((o) => console.log("   -", o));
 });
