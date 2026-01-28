@@ -1,21 +1,43 @@
+const mongoose = require("mongoose");
 const Bid = require("../models/Bid");
 const Request = require("../models/Request");
 const Receipt = require("../models/Receipt");
 
 // ------------------------------------
 // Seller rating aggregation (FIXED)
-// Uses rating.value (same schema as MainDashboard)
+// - Matches sellerId as ObjectId (not string)
+// - Uses rating.value (same schema as MainDashboard)
 // ------------------------------------
 const RATING_AGG_MAX_MS = 8000;
 
+function toObjectIdSafe(id) {
+  try {
+    if (!id) return null;
+    if (id instanceof mongoose.Types.ObjectId) return id;
+    if (typeof id === "string" && mongoose.Types.ObjectId.isValid(id)) {
+      return new mongoose.Types.ObjectId(id);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function buildSellerRatingMap(sellerIds) {
   if (!sellerIds || sellerIds.length === 0) return {};
+
+  // ✅ Convert to ObjectIds for correct Mongo matching
+  const sellerObjectIds = sellerIds
+    .map((id) => toObjectIdSafe(id))
+    .filter(Boolean);
+
+  if (sellerObjectIds.length === 0) return {};
 
   try {
     const agg = await Receipt.aggregate([
       {
         $match: {
-          sellerId: { $in: sellerIds.map((id) => id) },
+          sellerId: { $in: sellerObjectIds },
           "rating.value": { $exists: true, $ne: null },
         },
       },
@@ -151,6 +173,7 @@ exports.getBidsByRequest = async (req, res) => {
       .populate("sellerId", "email fullName")
       .sort({ createdAt: 1 });
 
+    // ✅ keep ids as ObjectId (not String)
     const sellerIds = [
       ...new Set(
         bids
