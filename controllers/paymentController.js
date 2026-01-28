@@ -262,8 +262,11 @@ exports.payNow = async (req, res) => {
       return res.status(400).json({ message: "Bid is not accepted" });
     }
 
-    // Prevent double-paying
-    const existingReceipt = await Receipt.findOne({ bidId: bid._id, status: "paid" });
+    // Prevent double-paying (support legacy "completed" + new "paid")
+    const existingReceipt = await Receipt.findOne({
+      bidId: bid._id,
+      status: { $in: ["paid", "completed"] },
+    });
     if (existingReceipt) {
       return res.status(200).json({
         message: "Already paid",
@@ -340,21 +343,19 @@ exports.payNow = async (req, res) => {
       cardExpMonth: expMonth,
       cardExpYear: expYear,
 
-      status: "paid",
+      // ✅ IMPORTANT: match your DB's allowed values (legacy uses "completed")
+      status: "completed",
       viewedByBuyer: true,
       viewedBySeller: false,
     });
 
-    // ✅ NEW: close lifecycle after successful payment
-    // 1) Mark winning bid as paid
+    // ✅ close lifecycle after successful payment
     bid.status = "paid";
     await bid.save();
 
-    // 2) Mark request as completed
     request.status = "completed";
     await request.save();
 
-    // 3) Remove losing bids (not needed anymore)
     await Bid.deleteMany({
       requestId: request._id,
       _id: { $ne: bid._id },
