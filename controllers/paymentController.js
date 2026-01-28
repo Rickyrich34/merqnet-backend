@@ -345,6 +345,21 @@ exports.payNow = async (req, res) => {
       viewedBySeller: false,
     });
 
+    // ✅ NEW: close lifecycle after successful payment
+    // 1) Mark winning bid as paid
+    bid.status = "paid";
+    await bid.save();
+
+    // 2) Mark request as completed
+    request.status = "completed";
+    await request.save();
+
+    // 3) Remove losing bids (not needed anymore)
+    await Bid.deleteMany({
+      requestId: request._id,
+      _id: { $ne: bid._id },
+    });
+
     return res.status(200).json({ message: "Payment successful", receiptId: receiptDoc.receiptId });
   } catch (err) {
     console.error("payNow error:", err);

@@ -18,6 +18,13 @@ const RequestSchema = new mongoose.Schema(
     },
 
     clientID: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+
+    // ✅ NEW: request lifecycle
+    status: {
+      type: String,
+      enum: ["open", "completed", "cancelled"],
+      default: "open",
+    },
   },
   { timestamps: true }
 );

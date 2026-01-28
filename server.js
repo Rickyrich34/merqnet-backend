@@ -38,7 +38,8 @@ const fromList = (process.env.CORS_ORIGINS || "")
 
 const allowedOrigins = [
   fromSingle,
-  ...fromList, // ✅ FIX: spread the list (your file had ".fromList" which is invalid)
+  ...fromList,
+
   // Local dev
   "http://localhost:5173",
   "http://localhost:3000",
@@ -72,7 +73,8 @@ const corsOptions = {
       return cb(null, true);
     }
 
-    // Hard deny (do NOT throw, keeps response stable)
+    // Instead of throwing (which can remove headers),
+    // we hard-deny with false.
     return cb(null, false);
   },
   credentials: true,
@@ -83,7 +85,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// ✅ FIX: Preflight MUST use same cors options (your file used cors() with no options)
+// Preflight (USE SAME OPTIONS - do NOT use cors() default here)
 app.options("*", cors(corsOptions));
 
 // Body parsing
