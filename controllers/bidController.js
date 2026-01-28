@@ -3,7 +3,8 @@ const Request = require("../models/Request");
 const Receipt = require("../models/Receipt");
 
 // ------------------------------------
-// Seller rating aggregation (unchanged)
+// Seller rating aggregation (FIXED)
+// Uses rating.value (same schema as MainDashboard)
 // ------------------------------------
 const RATING_AGG_MAX_MS = 8000;
 
@@ -15,13 +16,13 @@ async function buildSellerRatingMap(sellerIds) {
       {
         $match: {
           sellerId: { $in: sellerIds.map((id) => id) },
-          rating: { $exists: true, $ne: null },
+          "rating.value": { $exists: true, $ne: null },
         },
       },
       {
         $group: {
           _id: "$sellerId",
-          avgRating: { $avg: "$rating" },
+          avgRating: { $avg: "$rating.value" },
           ratingCount: { $sum: 1 },
         },
       },
@@ -57,8 +58,7 @@ function attachRatingToBidObject(bidObj, ratingMap) {
 }
 
 // ------------------------------------
-// CREATE BID (seller) ✅ eBay-style: update same bid
-// Now SYNCED: deliveryTime + images are saved/updated
+// CREATE BID (seller submits or updates)
 // ------------------------------------
 exports.createBid = async (req, res) => {
   try {
@@ -67,7 +67,6 @@ exports.createBid = async (req, res) => {
 
     const { unitPrice, totalPrice, deliveryTime, images } = req.body;
 
-    // prices required
     if (unitPrice === undefined || totalPrice === undefined) {
       return res.status(400).json({ message: "Missing fields" });
     }
@@ -84,18 +83,15 @@ exports.createBid = async (req, res) => {
       return res.status(404).json({ message: "Request not found" });
     }
 
-    // deliveryTime: optional, but if not provided -> "TBD"
     const deliveryClean =
       typeof deliveryTime === "string" && deliveryTime.trim()
         ? deliveryTime.trim()
         : "TBD";
 
-    // images: optional array
     const imagesClean = Array.isArray(images) ? images : [];
 
     const existing = await Bid.findOne({ requestId, sellerId });
 
-    // If bid exists, update it (unless already accepted / pending payment)
     if (existing) {
       if (existing.accepted || existing.status === "pending_payment") {
         return res.status(400).json({
@@ -106,8 +102,6 @@ exports.createBid = async (req, res) => {
       existing.unitPrice = u;
       existing.totalPrice = t;
 
-      // ✅ now allow updating deliveryTime/images if provided
-      // If client sends empty deliveryTime, keep what exists unless it’s empty
       if (typeof deliveryTime === "string") {
         existing.deliveryTime = deliveryClean;
       } else if (!existing.deliveryTime) {
@@ -127,7 +121,6 @@ exports.createBid = async (req, res) => {
       return res.status(200).json(existing);
     }
 
-    // First-time bid
     const bid = new Bid({
       requestId,
       sellerId,
@@ -148,7 +141,7 @@ exports.createBid = async (req, res) => {
 };
 
 // ------------------------------------
-// GET bids by request ✅ rating from receipts + sort stable
+// GET bids by request (buyer view)
 // ------------------------------------
 exports.getBidsByRequest = async (req, res) => {
   try {
@@ -168,7 +161,9 @@ exports.getBidsByRequest = async (req, res) => {
 
     const ratingMap = await buildSellerRatingMap(sellerIds);
 
-    const enriched = bids.map((b) => attachRatingToBidObject(b.toObject(), ratingMap));
+    const enriched = bids.map((b) =>
+      attachRatingToBidObject(b.toObject(), ratingMap)
+    );
 
     res.json(enriched);
   } catch (err) {
@@ -178,7 +173,7 @@ exports.getBidsByRequest = async (req, res) => {
 };
 
 // ------------------------------------
-// GET single bid by id (buyer) - for payment page
+// GET single bid by id
 // ------------------------------------
 exports.getBidById = async (req, res) => {
   try {
@@ -207,6 +202,7 @@ exports.acceptBid = async (req, res) => {
     bid.accepted = true;
     bid.acceptedAt = new Date();
     bid.status = "pending_payment";
+
     await bid.save();
 
     res.json({ message: "Bid accepted", bid });
