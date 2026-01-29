@@ -9,6 +9,17 @@ const generateToken = (id) => {
   });
 };
 
+// ✅ Password strength validation (backend enforcement)
+function isStrongPassword(password) {
+  const s = String(password || "");
+  const hasMin = s.length >= 8;
+  const hasUpper = /[A-Z]/.test(s);
+  const hasLower = /[a-z]/.test(s);
+  const hasNumber = /[0-9]/.test(s);
+  const hasSymbol = /[^A-Za-z0-9]/.test(s);
+  return hasMin && hasUpper && hasLower && hasNumber && hasSymbol;
+}
+
 // ============================
 // ✅ REGISTER USER
 // ============================
@@ -23,6 +34,14 @@ exports.registerUser = async (req, res) => {
       shippingAddresses,
       profileImage,
     } = req.body;
+
+    // ✅ Enforce strong password on backend
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({
+        message:
+          "Password must be 8+ chars and include uppercase, lowercase, a number, and a symbol.",
+      });
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
