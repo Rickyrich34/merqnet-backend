@@ -3,8 +3,15 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
 // ========== SHIPPING ADDRESS SCHEMA ==========
+// ✅ Backward compatible:
+// - DB keeps storing: addressLine1
+// - Frontend can send: streetAddress (alias -> addressLine1)
 const shippingAddressSchema = new mongoose.Schema({
-  addressLine1: { type: String, required: true },
+  addressLine1: {
+    type: String,
+    required: true,
+    alias: "streetAddress",
+  },
   addressLine2: { type: String, default: "" },
   city: { type: String, required: true },
   state: { type: String, required: true },
