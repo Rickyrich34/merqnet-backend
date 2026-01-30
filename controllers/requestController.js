@@ -12,12 +12,19 @@ exports.createRequest = async (req, res) => {
   }
 };
 
-// BUYER — GET REQUESTS BY CLIENT ID
+// BUYER — GET ACTIVE REQUESTS BY CLIENT ID
 exports.getRequestsByClientId = async (req, res) => {
   try {
     const { clientId } = req.params;
 
-    const requests = await Request.find({ clientID: clientId }).sort({
+    const requests = await Request.find({
+      clientID: clientId,
+
+      // 🔥 Exclude closed / finished
+      status: {
+        $nin: ["completed", "closed", "paid", "awarded", "expired", "cancelled"],
+      },
+    }).sort({
       createdAt: -1,
     });
 
@@ -39,7 +46,6 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
     };
 
     // ✅ Full legacy category mapping (backwards compatible)
-    // Official dropdown value -> acceptable DB values (official + legacy aliases)
     const categoryMap = {
       "Construction & Industrial": [
         "Construction & Industrial",
@@ -154,11 +160,9 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
     };
 
     if (category && category !== "All Categories") {
-      // If the selected category has aliases, match any of them.
       if (categoryMap[category]) {
         filter.category = { $in: categoryMap[category] };
       } else {
-        // Otherwise match exactly
         filter.category = category;
       }
     }
