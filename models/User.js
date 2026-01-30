@@ -114,6 +114,12 @@ const userSchema = new mongoose.Schema(
       default: "",
     },
 
+    // ✅ NEW: Stripe Connect Express account id (seller payouts)
+    stripeConnectAccountId: {
+      type: String,
+      default: "",
+    },
+
     cards: {
       type: [cardSchema],
       default: [],

@@ -4,6 +4,9 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 
+// ✅ NEW: Stripe webhook handler lives in paymentController (no new webhookRoutes file)
+const paymentController = require("./controllers/paymentController");
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -79,7 +82,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "Stripe-Signature"],
   optionsSuccessStatus: 204,
 };
 
@@ -88,7 +91,18 @@ app.use(cors(corsOptions));
 // Preflight (USE SAME OPTIONS - do NOT use cors() default here)
 app.options("*", cors(corsOptions));
 
-// Body parsing
+/**
+ * ✅ STRIPE WEBHOOK
+ * MUST be raw body so Stripe signature verification works.
+ * This must be defined BEFORE express.json().
+ */
+app.post(
+  "/api/webhooks/stripe",
+  express.raw({ type: "application/json" }),
+  paymentController.stripeWebhook
+);
+
+// Body parsing (for all other routes)
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 

@@ -10,18 +10,22 @@ const getAuthUserId = (req) => req.user?.id || null;
 
 const makeReceiptId = () => `REC-${Math.floor(100000 + Math.random() * 900000)}`;
 
+// ✅ 8% platform fee
+const PLATFORM_FEE_BPS = 800; // 8.00% (basis points)
+
 function stripeErrMessage(err) {
-  return (
-    err?.raw?.message ||
-    err?.message ||
-    "Stripe error"
-  );
+  return err?.raw?.message || err?.message || "Stripe error";
 }
 
 function stripeErrStatus(err) {
   // Stripe lib often sets statusCode
   const s = Number(err?.statusCode);
   return Number.isFinite(s) && s >= 400 && s <= 599 ? s : 500;
+}
+
+function calcFeeCents(amountCents) {
+  // round to nearest cent
+  return Math.round((amountCents * PLATFORM_FEE_BPS) / 10000);
 }
 
 async function ensureStripeCustomer(user) {
@@ -33,8 +37,7 @@ async function ensureStripeCustomer(user) {
     } catch (e) {
       const msg = String(stripeErrMessage(e) || "");
       const isMissing =
-        e?.raw?.code === "resource_missing" ||
-        /no such customer/i.test(msg);
+        e?.raw?.code === "resource_missing" || /no such customer/i.test(msg);
 
       // If it’s missing, we’ll recreate. If it's another Stripe error, throw.
       if (!isMissing) throw e;
@@ -261,7 +264,7 @@ exports.setDefaultCard = async (req, res) => {
 };
 
 // -----------------------------
-// PAY NOW (charges API)
+// PAY NOW (charges API) — legacy (keep for now)
 // -----------------------------
 exports.payNow = async (req, res) => {
   try {
@@ -383,5 +386,280 @@ exports.payNow = async (req, res) => {
   } catch (err) {
     console.error("payNow error:", err);
     return res.status(500).json({ message: "Payment failed" });
+  }
+};
+
+/**
+ * ==========================================================
+ * ✅ NEW: Connect onboarding (seller)
+ * ==========================================================
+ */
+exports.createConnectOnboardingLink = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ message: "Stripe secret key not configured" });
+    }
+
+    // Create Express account if missing
+    let accountId = user.stripeConnectAccountId || "";
+    if (!accountId) {
+      const acct = await stripe.accounts.create({
+        type: "express",
+        country: "US",
+        email: user.email,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        business_type: "individual",
+        metadata: {
+          merqnetUserId: String(user._id),
+        },
+      });
+
+      accountId = acct.id;
+      user.stripeConnectAccountId = accountId;
+      await user.save();
+    }
+
+    const frontend = (process.env.STRIPE_CONNECT_RETURN_URL || process.env.FRONTEND_URL || "").replace(/\/$/, "");
+    const returnUrl = process.env.STRIPE_CONNECT_RETURN_URL || (frontend ? `${frontend}/settings` : "https://example.com");
+    const refreshUrl = process.env.STRIPE_CONNECT_REFRESH_URL || returnUrl;
+
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+      type: "account_onboarding",
+    });
+
+    return res.status(200).json({
+      message: "Onboarding link created",
+      url: link.url,
+      stripeConnectAccountId: accountId,
+    });
+  } catch (err) {
+    console.error("createConnectOnboardingLink error:", err);
+    const msg = stripeErrMessage(err);
+    const status = stripeErrStatus(err);
+    return res.status(status).json({ message: msg || "Failed to create onboarding link" });
+  }
+};
+
+/**
+ * ==========================================================
+ * ✅ NEW: PaymentIntent (Apple Pay / Google Pay / PayPal via Elements frontend)
+ * - Takes 8% platform fee
+ * - Sends payout to seller via Connect destination charges
+ * ==========================================================
+ */
+exports.createPaymentIntent = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    const { requestId, bidId } = req.body || {};
+
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!requestId || !bidId) return res.status(400).json({ message: "Missing requestId or bidId" });
+
+    const buyer = await User.findById(userId);
+    if (!buyer) return res.status(404).json({ message: "User not found" });
+
+    const request = await Request.findById(requestId);
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    if (String(request.clientID) !== String(buyer._id)) {
+      return res.status(403).json({ message: "Forbidden: only buyer can pay" });
+    }
+
+    const bid = await Bid.findById(bidId);
+    if (!bid) return res.status(404).json({ message: "Bid not found" });
+
+    if (String(bid.requestId) !== String(request._id)) {
+      return res.status(400).json({ message: "Bid does not belong to this request" });
+    }
+
+    if (!bid.accepted) {
+      return res.status(400).json({ message: "Bid is not accepted" });
+    }
+
+    // Idempotency: if already paid, return receipt
+    const existingReceipt = await Receipt.findOne({
+      bidId: bid._id,
+      status: { $in: ["paid", "completed"] },
+    });
+    if (existingReceipt) {
+      return res.status(200).json({
+        message: "Already paid",
+        receiptId: existingReceipt.receiptId,
+      });
+    }
+
+    const total = Number(bid.totalPrice);
+    if (!Number.isFinite(total) || total <= 0) {
+      return res.status(400).json({ message: "Invalid bid total price" });
+    }
+
+    const amountCents = Math.round(total * 100);
+    const feeCents = calcFeeCents(amountCents);
+
+    // Seller must be onboarded in Connect
+    const seller = await User.findById(bid.sellerId).select("stripeConnectAccountId email");
+    if (!seller) return res.status(404).json({ message: "Seller not found" });
+
+    const destination = seller.stripeConnectAccountId || "";
+    if (!destination) {
+      return res.status(400).json({
+        message:
+          "Seller is not onboarded to Stripe Connect yet. Seller must complete onboarding before receiving payouts.",
+      });
+    }
+
+    const customerId = await ensureStripeCustomer(buyer);
+
+    const idempotencyKey = `pi_${requestId}_${bidId}_${userId}`;
+
+    const pi = await stripe.paymentIntents.create(
+      {
+        amount: amountCents,
+        currency: "usd",
+        customer: customerId,
+        // ✅ lets Stripe enable Apple Pay/Google Pay/etc automatically when available on frontend
+        automatic_payment_methods: { enabled: true },
+
+        // Marketplace fee + payout
+        application_fee_amount: Math.min(feeCents, amountCents),
+        transfer_data: { destination },
+
+        description: `MerqNet payment | request ${requestId} | bid ${bidId}`,
+        metadata: {
+          requestId: String(requestId),
+          bidId: String(bidId),
+          buyerId: String(buyer._id),
+          sellerId: String(bid.sellerId),
+          platformFeeBps: String(PLATFORM_FEE_BPS),
+        },
+      },
+      { idempotencyKey }
+    );
+
+    return res.status(200).json({
+      clientSecret: pi.client_secret,
+      paymentIntentId: pi.id,
+      amount: total,
+      currency: "usd",
+      platformFee: feeCents / 100,
+    });
+  } catch (err) {
+    console.error("createPaymentIntent error:", err);
+    const msg = stripeErrMessage(err);
+    const status = stripeErrStatus(err);
+    return res.status(status).json({ message: msg || "Failed to create payment intent" });
+  }
+};
+
+/**
+ * ==========================================================
+ * ✅ NEW: Stripe Webhook
+ * - Verifies Stripe signature
+ * - On payment_intent.succeeded: creates receipt + marks bid/request
+ * ==========================================================
+ */
+exports.stripeWebhook = async (req, res) => {
+  try {
+    const secret = process.env.STRIPE_WEBHOOK_SECRET || "";
+    if (!secret) {
+      return res.status(500).send("Missing STRIPE_WEBHOOK_SECRET");
+    }
+
+    const sig = req.headers["stripe-signature"];
+    if (!sig) return res.status(400).send("Missing Stripe-Signature header");
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, secret);
+    } catch (err) {
+      console.error("Webhook signature verify failed:", stripeErrMessage(err));
+      return res.status(400).send(`Webhook Error: ${stripeErrMessage(err)}`);
+    }
+
+    if (event.type === "payment_intent.succeeded") {
+      const pi = event.data.object;
+
+      const requestId = pi?.metadata?.requestId;
+      const bidId = pi?.metadata?.bidId;
+      const buyerId = pi?.metadata?.buyerId;
+      const sellerId = pi?.metadata?.sellerId;
+
+      if (requestId && bidId && buyerId && sellerId) {
+        // Avoid duplicates
+        const existing = await Receipt.findOne({
+          stripePaymentIntentId: pi.id,
+          status: { $in: ["paid", "completed"] },
+        });
+
+        if (!existing) {
+          const request = await Request.findById(requestId);
+          const bid = await Bid.findById(bidId);
+
+          if (request && bid) {
+            const charge = (pi?.charges?.data && pi.charges.data[0]) || null;
+            const cardDetails = charge?.payment_method_details?.card || {};
+            const brand = cardDetails.brand ? String(cardDetails.brand).toUpperCase() : null;
+            const last4 = cardDetails.last4 || null;
+            const expMonth = cardDetails.exp_month ?? null;
+            const expYear = cardDetails.exp_year ?? null;
+            const paymentMethodLabel = brand && last4 ? `${brand} •••• ${last4}` : null;
+
+            const amount = Number(pi.amount_received || pi.amount || 0) / 100;
+
+            const receiptDoc = await Receipt.create({
+              receiptId: makeReceiptId(),
+              requestId: request._id,
+              bidId: bid._id,
+              buyerId,
+              sellerId,
+              amount,
+              currency: pi.currency || "usd",
+              stripeChargeId: charge?.id || null,
+              stripePaymentIntentId: pi.id,
+              stripePaymentMethodId: pi.payment_method || null,
+              paymentMethod: paymentMethodLabel,
+              cardBrand: brand,
+              cardLast4: last4,
+              cardExpMonth: expMonth,
+              cardExpYear: expYear,
+              status: "completed",
+              viewedByBuyer: true,
+              viewedBySeller: false,
+            });
+
+            bid.status = "paid";
+            await bid.save();
+
+            request.status = "completed";
+            await request.save();
+
+            await Bid.deleteMany({
+              requestId: request._id,
+              _id: { $ne: bid._id },
+            });
+
+            console.log("✅ Webhook completed receipt:", receiptDoc.receiptId);
+          }
+        }
+      }
+    }
+
+    // Always return 200 so Stripe stops retrying
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error("stripeWebhook error:", err);
+    return res.status(500).send("Webhook handler failed");
   }
 };
