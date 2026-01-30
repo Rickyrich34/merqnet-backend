@@ -70,7 +70,7 @@ exports.registerUser = async (req, res) => {
 };
 
 // ============================
-// ✅ LOGIN USER (MIN FIX)
+// ✅ LOGIN USER
 // ============================
 exports.loginUser = async (req, res) => {
   try {
@@ -86,12 +86,11 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    // ✅ Keep existing response shape + add userId top-level (non-breaking)
     return res.status(200).json({
       message: "Login successful",
-      userId: user._id, // ✅ added (safe)
+      userId: user._id,
       user: {
-        id: user._id, // keep existing
+        id: user._id,
         email: user.email,
         fullName: user.fullName,
       },
