@@ -9,11 +9,9 @@ exports.createRequest = async (req, res) => {
   try {
     const newRequest = new Request(req.body);
     const savedRequest = await newRequest.save();
-
     res.status(201).json(savedRequest);
   } catch (error) {
     console.error("Error creating request:", error);
-
     res.status(400).json({
       message: "Request validation failed",
       error,
@@ -32,21 +30,13 @@ exports.getRequestsByClientId = async (req, res) => {
     const requests = await Request.find({
       clientID: clientId,
       status: {
-        $nin: [
-          "completed",
-          "closed",
-          "paid",
-          "awarded",
-          "expired",
-          "cancelled",
-        ],
+        $nin: ["completed", "closed", "paid", "awarded", "expired", "cancelled"],
       },
     }).sort({ createdAt: -1 });
 
     res.json(requests);
   } catch (error) {
     console.error("Error loading buyer requests:", error);
-
     res.status(500).json({
       message: "Error loading buyer requests",
       error: error?.message || String(error),
@@ -67,11 +57,11 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
       return res.status(400).json({ message: "Invalid userId" });
     }
 
+    // ✅ Only show OPEN requests to sellers
     const filter = {
       clientID: { $ne: new mongoose.Types.ObjectId(userId) },
+      status: "open",
     };
-
-    /* -------- CATEGORY MAP -------- */
 
     const categoryMap = {
       "Construction & Industrial": [
@@ -87,8 +77,6 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
         "Tech",
         "Electronics",
         "Technology/Electronics",
-        "Technology & Electronics",
-        "Technology & Electronics",
       ],
 
       "Medical & Laboratory Equipment": [
@@ -102,13 +90,7 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
         "Lab Equipment",
       ],
 
-      "Home & Garden": [
-        "Home & Garden",
-        "Home",
-        "Garden",
-        "Home/Garden",
-        "Household",
-      ],
+      "Home & Garden": ["Home & Garden", "Home", "Garden", "Home/Garden", "Household"],
 
       "Automotive & Parts": [
         "Automotive & Parts",
@@ -120,13 +102,7 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
         "Parts",
       ],
 
-      "Sports & Outdoors": [
-        "Sports & Outdoors",
-        "Sports",
-        "Outdoors",
-        "Sporting Goods",
-        "Outdoor",
-      ],
+      "Sports & Outdoors": ["Sports & Outdoors", "Sports", "Outdoors", "Sporting Goods", "Outdoor"],
 
       "Office & Business Supplies": [
         "Office & Business Supplies",
@@ -147,22 +123,9 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
         "Restaurant Supplies",
       ],
 
-      "Clothing & Textiles": [
-        "Clothing & Textiles",
-        "Clothing",
-        "Textiles",
-        "Apparel",
-        "Fashion",
-        "Ropa",
-      ],
+      "Clothing & Textiles": ["Clothing & Textiles", "Clothing", "Textiles", "Apparel", "Fashion", "Ropa"],
 
-      "Beauty & Personal Care": [
-        "Beauty & Personal Care",
-        "Beauty",
-        "Personal Care",
-        "Cosmetics",
-        "Skincare",
-      ],
+      "Beauty & Personal Care": ["Beauty & Personal Care", "Beauty", "Personal Care", "Cosmetics", "Skincare"],
 
       "Entertainment & Media": [
         "Entertainment & Media",
@@ -176,19 +139,10 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
         "Gaming",
       ],
 
-      "Services": [
-        "Services",
-        "Service",
-        "Professional Services",
-        "Labor",
-        "Repairs",
-        "Repair",
-      ],
+      "Services": ["Services", "Service", "Professional Services", "Labor", "Repairs", "Repair"],
 
       "Other": ["Other", "Else", "Misc", "Miscellaneous", "General"],
     };
-
-    /* -------- CATEGORY FILTER -------- */
 
     if (category && category !== "All Categories") {
       if (categoryMap[category]) {
@@ -198,17 +152,13 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
       }
     }
 
-    /* -------- QUERY -------- */
-
     const requests = await Request.find(filter)
       .populate("clientID", "fullName email shippingAddresses")
-      // IMPORTANT: removed invalid populate("offers.sellerId"...)
       .sort({ createdAt: -1 });
 
     res.json({ requests });
   } catch (error) {
     console.error("Error loading filtered requests:", error);
-
     res.status(500).json({
       message: "Error loading filtered requests",
       error: error?.message || String(error),
@@ -223,11 +173,9 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
 exports.getRequestById = async (req, res) => {
   try {
     const request = await Request.findById(req.params.id);
-
     res.json(request);
   } catch (error) {
     console.error("Error loading request:", error);
-
     res.status(500).json({
       message: "Error loading request",
       error: error?.message || String(error),
@@ -242,13 +190,9 @@ exports.getRequestById = async (req, res) => {
 exports.deleteRequest = async (req, res) => {
   try {
     await Request.findByIdAndDelete(req.params.id);
-
-    res.json({
-      message: "Request deleted",
-    });
+    res.json({ message: "Request deleted" });
   } catch (error) {
     console.error("Error deleting request:", error);
-
     res.status(500).json({
       message: "Error deleting request",
       error: error?.message || String(error),
