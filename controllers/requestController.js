@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Request = require("../models/Request");
 
 /* ===============================
@@ -30,7 +31,6 @@ exports.getRequestsByClientId = async (req, res) => {
 
     const requests = await Request.find({
       clientID: clientId,
-
       status: {
         $nin: [
           "completed",
@@ -49,6 +49,7 @@ exports.getRequestsByClientId = async (req, res) => {
 
     res.status(500).json({
       message: "Error loading buyer requests",
+      error: error?.message || String(error),
     });
   }
 };
@@ -62,8 +63,12 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
     const { userId } = req.params;
     const { category } = req.query;
 
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: "Invalid userId" });
+    }
+
     const filter = {
-      clientID: { $ne: userId },
+      clientID: { $ne: new mongoose.Types.ObjectId(userId) },
     };
 
     /* -------- CATEGORY MAP -------- */
@@ -82,6 +87,8 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
         "Tech",
         "Electronics",
         "Technology/Electronics",
+        "Technology & Electronics",
+        "Technology & Electronics",
       ],
 
       "Medical & Laboratory Equipment": [
@@ -195,7 +202,7 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
 
     const requests = await Request.find(filter)
       .populate("clientID", "fullName email shippingAddresses")
-      .populate("offers.sellerId", "fullName email rating")
+      // IMPORTANT: removed invalid populate("offers.sellerId"...)
       .sort({ createdAt: -1 });
 
     res.json({ requests });
@@ -204,6 +211,7 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
 
     res.status(500).json({
       message: "Error loading filtered requests",
+      error: error?.message || String(error),
     });
   }
 };
@@ -222,6 +230,7 @@ exports.getRequestById = async (req, res) => {
 
     res.status(500).json({
       message: "Error loading request",
+      error: error?.message || String(error),
     });
   }
 };
@@ -242,6 +251,7 @@ exports.deleteRequest = async (req, res) => {
 
     res.status(500).json({
       message: "Error deleting request",
+      error: error?.message || String(error),
     });
   }
 };
