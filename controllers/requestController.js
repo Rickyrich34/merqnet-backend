@@ -1,18 +1,29 @@
 const Request = require("../models/Request");
 
-// CREATE REQUEST
+/* ===============================
+   CREATE REQUEST
+================================ */
+
 exports.createRequest = async (req, res) => {
   try {
     const newRequest = new Request(req.body);
     const savedRequest = await newRequest.save();
+
     res.status(201).json(savedRequest);
   } catch (error) {
     console.error("Error creating request:", error);
-    res.status(400).json({ message: "Request validation failed", error });
+
+    res.status(400).json({
+      message: "Request validation failed",
+      error,
+    });
   }
 };
 
-// BUYER — GET ACTIVE REQUESTS BY CLIENT ID
+/* ===============================
+   BUYER — GET ACTIVE REQUESTS
+================================ */
+
 exports.getRequestsByClientId = async (req, res) => {
   try {
     const { clientId } = req.params;
@@ -20,32 +31,43 @@ exports.getRequestsByClientId = async (req, res) => {
     const requests = await Request.find({
       clientID: clientId,
 
-      // 🔥 Exclude closed / finished
       status: {
-        $nin: ["completed", "closed", "paid", "awarded", "expired", "cancelled"],
+        $nin: [
+          "completed",
+          "closed",
+          "paid",
+          "awarded",
+          "expired",
+          "cancelled",
+        ],
       },
-    }).sort({
-      createdAt: -1,
-    });
+    }).sort({ createdAt: -1 });
 
     res.json(requests);
   } catch (error) {
     console.error("Error loading buyer requests:", error);
-    res.status(500).json({ message: "Error loading buyer requests" });
+
+    res.status(500).json({
+      message: "Error loading buyer requests",
+    });
   }
 };
 
-// SELLER — FILTER REQUESTS (SUPPORTS ?category=... + FULL LEGACY CATEGORY MAPPING)
+/* ===============================
+   SELLER — FILTER REQUESTS
+================================ */
+
 exports.getFilteredRequestsForSeller = async (req, res) => {
   try {
     const { userId } = req.params;
     const { category } = req.query;
 
     const filter = {
-      clientID: { $ne: userId }, // exclude seller’s own requests
+      clientID: { $ne: userId },
     };
 
-    // ✅ Full legacy category mapping (backwards compatible)
+    /* -------- CATEGORY MAP -------- */
+
     const categoryMap = {
       "Construction & Industrial": [
         "Construction & Industrial",
@@ -159,6 +181,8 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
       "Other": ["Other", "Else", "Misc", "Miscellaneous", "General"],
     };
 
+    /* -------- CATEGORY FILTER -------- */
+
     if (category && category !== "All Categories") {
       if (categoryMap[category]) {
         filter.category = { $in: categoryMap[category] };
@@ -167,33 +191,57 @@ exports.getFilteredRequestsForSeller = async (req, res) => {
       }
     }
 
+    /* -------- QUERY -------- */
+
     const requests = await Request.find(filter)
       .populate("clientID", "fullName email shippingAddresses")
+      .populate("offers.sellerId", "fullName email rating")
       .sort({ createdAt: -1 });
 
     res.json({ requests });
   } catch (error) {
     console.error("Error loading filtered requests:", error);
-    res.status(500).json({ message: "Error loading filtered requests" });
+
+    res.status(500).json({
+      message: "Error loading filtered requests",
+    });
   }
 };
 
-// GET ONE REQUEST
+/* ===============================
+   GET ONE REQUEST
+================================ */
+
 exports.getRequestById = async (req, res) => {
   try {
     const request = await Request.findById(req.params.id);
+
     res.json(request);
   } catch (error) {
-    res.status(500).json({ message: "Error loading request" });
+    console.error("Error loading request:", error);
+
+    res.status(500).json({
+      message: "Error loading request",
+    });
   }
 };
 
-// DELETE REQUEST
+/* ===============================
+   DELETE REQUEST
+================================ */
+
 exports.deleteRequest = async (req, res) => {
   try {
     await Request.findByIdAndDelete(req.params.id);
-    res.json({ message: "Request deleted" });
+
+    res.json({
+      message: "Request deleted",
+    });
   } catch (error) {
-    res.status(500).json({ message: "Error deleting request" });
+    console.error("Error deleting request:", error);
+
+    res.status(500).json({
+      message: "Error deleting request",
+    });
   }
 };
