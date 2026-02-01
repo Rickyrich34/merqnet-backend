@@ -18,18 +18,15 @@ function stripeErrMessage(err) {
 }
 
 function stripeErrStatus(err) {
-  // Stripe lib often sets statusCode
   const s = Number(err?.statusCode);
   return Number.isFinite(s) && s >= 400 && s <= 599 ? s : 500;
 }
 
 function calcFeeCents(amountCents) {
-  // round to nearest cent
   return Math.round((amountCents * PLATFORM_FEE_BPS) / 10000);
 }
 
 async function ensureStripeCustomer(user) {
-  // If user already has a customer id, verify it exists in *this* Stripe account.
   if (user.stripeCustomerId) {
     try {
       const existing = await stripe.customers.retrieve(user.stripeCustomerId);
@@ -39,7 +36,6 @@ async function ensureStripeCustomer(user) {
       const isMissing =
         e?.raw?.code === "resource_missing" || /no such customer/i.test(msg);
 
-      // If it’s missing, we’ll recreate. If it's another Stripe error, throw.
       if (!isMissing) throw e;
     }
   }
@@ -73,9 +69,11 @@ async function ensureLocalDefaultCard(user) {
   return def;
 }
 
-// -----------------------------
+/* ==========================================================
+   CARDS CRUD
+========================================================== */
+
 // GET CARDS
-// -----------------------------
 exports.getCards = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -92,9 +90,7 @@ exports.getCards = async (req, res) => {
   }
 };
 
-// -----------------------------
 // ADD CARD (tokenId from Stripe Elements)
-// -----------------------------
 exports.addCard = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -126,26 +122,12 @@ exports.addCard = async (req, res) => {
 
     if (!Array.isArray(user.cards)) user.cards = [];
 
-    if (makeDefault) {
-      user.cards.forEach((c) => (c.isDefault = false));
-      newCard.isDefault = true;
-      try {
-        await setStripeDefaultSource(customerId, source.id);
-      } catch (e) {
-        console.warn("set default_source failed:", stripeErrMessage(e));
-      }
-    } else if (user.cards.length === 0) {
-      user.cards.forEach((c) => (c.isDefault = false));
-      newCard.isDefault = true;
-      try {
-        await setStripeDefaultSource(customerId, source.id);
-      } catch (e) {
-        console.warn("set default_source failed:", stripeErrMessage(e));
-      }
-    }
-
+    // Prevent duplicates (best-effort)
     const dup = user.cards.find(
-      (c) => c.last4 === newCard.last4 && c.exp_year === newCard.exp_year && c.exp_month === newCard.exp_month
+      (c) =>
+        String(c.last4) === String(newCard.last4) &&
+        Number(c.exp_year) === Number(newCard.exp_year) &&
+        Number(c.exp_month) === Number(newCard.exp_month)
     );
     if (dup) {
       try {
@@ -154,12 +136,22 @@ exports.addCard = async (req, res) => {
       return res.status(400).json({ message: "Card already exists" });
     }
 
+    // Default handling
+    if (makeDefault || user.cards.length === 0) {
+      user.cards.forEach((c) => (c.isDefault = false));
+      newCard.isDefault = true;
+      try {
+        await setStripeDefaultSource(customerId, source.id);
+      } catch (e) {
+        console.warn("set default_source failed:", stripeErrMessage(e));
+      }
+    }
+
     user.cards.push(newCard);
     await user.save();
 
     return res.status(201).json({ message: "Card saved", card: newCard });
   } catch (err) {
-    // IMPORTANT: show the real Stripe error message (safe for debugging)
     console.error("addCard error:", err);
     const msg = stripeErrMessage(err);
     const status = stripeErrStatus(err);
@@ -169,9 +161,7 @@ exports.addCard = async (req, res) => {
   }
 };
 
-// -----------------------------
 // DELETE CARD (param = last4, based on your current model)
-// -----------------------------
 exports.deleteCard = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -221,9 +211,7 @@ exports.deleteCard = async (req, res) => {
   }
 };
 
-// -----------------------------
 // SET DEFAULT CARD (param = last4, based on your current model)
-// -----------------------------
 exports.setDefaultCard = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -263,9 +251,10 @@ exports.setDefaultCard = async (req, res) => {
   }
 };
 
-// -----------------------------
-// PAY NOW (charges API) — legacy (keep for now)
-// -----------------------------
+/* ==========================================================
+   LEGACY PAY NOW (charges API) — keep for backward compatibility
+========================================================== */
+
 exports.payNow = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -389,11 +378,10 @@ exports.payNow = async (req, res) => {
   }
 };
 
-/**
- * ==========================================================
- * ✅ NEW: Connect onboarding (seller)
- * ==========================================================
- */
+/* ==========================================================
+   STRIPE CONNECT (seller onboarding)
+========================================================== */
+
 exports.createConnectOnboardingLink = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -406,7 +394,6 @@ exports.createConnectOnboardingLink = async (req, res) => {
       return res.status(500).json({ message: "Stripe secret key not configured" });
     }
 
-    // Create Express account if missing
     let accountId = user.stripeConnectAccountId || "";
     if (!accountId) {
       const acct = await stripe.accounts.create({
@@ -418,9 +405,7 @@ exports.createConnectOnboardingLink = async (req, res) => {
           transfers: { requested: true },
         },
         business_type: "individual",
-        metadata: {
-          merqnetUserId: String(user._id),
-        },
+        metadata: { merqnetUserId: String(user._id) },
       });
 
       accountId = acct.id;
@@ -429,7 +414,8 @@ exports.createConnectOnboardingLink = async (req, res) => {
     }
 
     const frontend = (process.env.STRIPE_CONNECT_RETURN_URL || process.env.FRONTEND_URL || "").replace(/\/$/, "");
-    const returnUrl = process.env.STRIPE_CONNECT_RETURN_URL || (frontend ? `${frontend}/settings` : "https://example.com");
+    const returnUrl =
+      process.env.STRIPE_CONNECT_RETURN_URL || (frontend ? `${frontend}/settings` : "https://example.com");
     const refreshUrl = process.env.STRIPE_CONNECT_REFRESH_URL || returnUrl;
 
     const link = await stripe.accountLinks.create({
@@ -452,13 +438,12 @@ exports.createConnectOnboardingLink = async (req, res) => {
   }
 };
 
-/**
- * ==========================================================
- * ✅ NEW: PaymentIntent (Apple Pay / Google Pay / PayPal via Elements frontend)
- * - Takes 8% platform fee
- * - Sends payout to seller via Connect destination charges
- * ==========================================================
- */
+/* ==========================================================
+   PAYMENT INTENT FLOW (choose payment method at pay time)
+   - createPaymentIntent: returns clientSecret
+   - completePaymentIntent: creates receipt + marks bid/request (NO WEBHOOK REQUIRED)
+========================================================== */
+
 exports.createPaymentIntent = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -497,6 +482,8 @@ exports.createPaymentIntent = async (req, res) => {
       return res.status(200).json({
         message: "Already paid",
         receiptId: existingReceipt.receiptId,
+        clientSecret: null,
+        paymentIntentId: null,
       });
     }
 
@@ -521,7 +508,6 @@ exports.createPaymentIntent = async (req, res) => {
     }
 
     const customerId = await ensureStripeCustomer(buyer);
-
     const idempotencyKey = `pi_${requestId}_${bidId}_${userId}`;
 
     const pi = await stripe.paymentIntents.create(
@@ -529,10 +515,8 @@ exports.createPaymentIntent = async (req, res) => {
         amount: amountCents,
         currency: "usd",
         customer: customerId,
-        // ✅ lets Stripe enable Apple Pay/Google Pay/etc automatically when available on frontend
         automatic_payment_methods: { enabled: true },
 
-        // Marketplace fee + payout
         application_fee_amount: Math.min(feeCents, amountCents),
         transfer_data: { destination },
 
@@ -563,13 +547,124 @@ exports.createPaymentIntent = async (req, res) => {
   }
 };
 
-/**
- * ==========================================================
- * ✅ NEW: Stripe Webhook
- * - Verifies Stripe signature
- * - On payment_intent.succeeded: creates receipt + marks bid/request
- * ==========================================================
- */
+// ✅ NEW: finalize without webhook
+// Call this after stripe.confirmPayment() returns succeeded
+exports.completePaymentIntent = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+    const { paymentIntentId } = req.body || {};
+
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!paymentIntentId) return res.status(400).json({ message: "Missing paymentIntentId" });
+
+    const buyer = await User.findById(userId);
+    if (!buyer) return res.status(404).json({ message: "User not found" });
+
+    // If already created, return it
+    const existing = await Receipt.findOne({
+      stripePaymentIntentId: String(paymentIntentId),
+      status: { $in: ["paid", "completed"] },
+    });
+    if (existing) {
+      return res.status(200).json({ message: "Already completed", receiptId: existing.receiptId });
+    }
+
+    const pi = await stripe.paymentIntents.retrieve(String(paymentIntentId), {
+      expand: ["charges.data.payment_method_details"],
+    });
+
+    if (!pi) return res.status(404).json({ message: "PaymentIntent not found" });
+
+    const buyerId = pi?.metadata?.buyerId;
+    if (!buyerId || String(buyerId) !== String(buyer._id)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (pi.status !== "succeeded") {
+      return res.status(400).json({ message: `Payment not succeeded (status=${pi.status})` });
+    }
+
+    const requestId = pi?.metadata?.requestId;
+    const bidId = pi?.metadata?.bidId;
+    const sellerId = pi?.metadata?.sellerId;
+
+    if (!requestId || !bidId || !sellerId) {
+      return res.status(400).json({ message: "Missing metadata on PaymentIntent" });
+    }
+
+    const request = await Request.findById(requestId);
+    if (!request) return res.status(404).json({ message: "Request not found" });
+
+    if (String(request.clientID) !== String(buyer._id)) {
+      return res.status(403).json({ message: "Forbidden: only buyer can complete" });
+    }
+
+    const bid = await Bid.findById(bidId);
+    if (!bid) return res.status(404).json({ message: "Bid not found" });
+
+    if (String(bid.requestId) !== String(request._id)) {
+      return res.status(400).json({ message: "Bid does not belong to this request" });
+    }
+
+    if (!bid.accepted) {
+      return res.status(400).json({ message: "Bid is not accepted" });
+    }
+
+    // Build receipt details from charge
+    const charge = (pi?.charges?.data && pi.charges.data[0]) || null;
+    const cardDetails = charge?.payment_method_details?.card || {};
+    const brand = cardDetails.brand ? String(cardDetails.brand).toUpperCase() : null;
+    const last4 = cardDetails.last4 || null;
+    const expMonth = cardDetails.exp_month ?? null;
+    const expYear = cardDetails.exp_year ?? null;
+    const paymentMethodLabel = brand && last4 ? `${brand} •••• ${last4}` : null;
+
+    const amount = Number(pi.amount_received || pi.amount || 0) / 100;
+
+    const receiptDoc = await Receipt.create({
+      receiptId: makeReceiptId(),
+      requestId: request._id,
+      bidId: bid._id,
+      buyerId: buyer._id,
+      sellerId: bid.sellerId,
+      amount,
+      currency: pi.currency || "usd",
+      stripeChargeId: charge?.id || null,
+      stripePaymentIntentId: pi.id,
+      stripePaymentMethodId: pi.payment_method || null,
+      paymentMethod: paymentMethodLabel,
+      cardBrand: brand,
+      cardLast4: last4,
+      cardExpMonth: expMonth,
+      cardExpYear: expYear,
+      status: "completed",
+      viewedByBuyer: true,
+      viewedBySeller: false,
+    });
+
+    bid.status = "paid";
+    await bid.save();
+
+    request.status = "completed";
+    await request.save();
+
+    await Bid.deleteMany({
+      requestId: request._id,
+      _id: { $ne: bid._id },
+    });
+
+    return res.status(200).json({ message: "Completed", receiptId: receiptDoc.receiptId });
+  } catch (err) {
+    console.error("completePaymentIntent error:", err);
+    const msg = stripeErrMessage(err);
+    const status = stripeErrStatus(err);
+    return res.status(status).json({ message: msg || "Failed to complete payment" });
+  }
+};
+
+/* ==========================================================
+   OPTIONAL WEBHOOK (you can keep this; not required anymore)
+========================================================== */
 exports.stripeWebhook = async (req, res) => {
   try {
     const secret = process.env.STRIPE_WEBHOOK_SECRET || "";
@@ -590,73 +685,11 @@ exports.stripeWebhook = async (req, res) => {
 
     if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object;
-
-      const requestId = pi?.metadata?.requestId;
-      const bidId = pi?.metadata?.bidId;
-      const buyerId = pi?.metadata?.buyerId;
-      const sellerId = pi?.metadata?.sellerId;
-
-      if (requestId && bidId && buyerId && sellerId) {
-        // Avoid duplicates
-        const existing = await Receipt.findOne({
-          stripePaymentIntentId: pi.id,
-          status: { $in: ["paid", "completed"] },
-        });
-
-        if (!existing) {
-          const request = await Request.findById(requestId);
-          const bid = await Bid.findById(bidId);
-
-          if (request && bid) {
-            const charge = (pi?.charges?.data && pi.charges.data[0]) || null;
-            const cardDetails = charge?.payment_method_details?.card || {};
-            const brand = cardDetails.brand ? String(cardDetails.brand).toUpperCase() : null;
-            const last4 = cardDetails.last4 || null;
-            const expMonth = cardDetails.exp_month ?? null;
-            const expYear = cardDetails.exp_year ?? null;
-            const paymentMethodLabel = brand && last4 ? `${brand} •••• ${last4}` : null;
-
-            const amount = Number(pi.amount_received || pi.amount || 0) / 100;
-
-            const receiptDoc = await Receipt.create({
-              receiptId: makeReceiptId(),
-              requestId: request._id,
-              bidId: bid._id,
-              buyerId,
-              sellerId,
-              amount,
-              currency: pi.currency || "usd",
-              stripeChargeId: charge?.id || null,
-              stripePaymentIntentId: pi.id,
-              stripePaymentMethodId: pi.payment_method || null,
-              paymentMethod: paymentMethodLabel,
-              cardBrand: brand,
-              cardLast4: last4,
-              cardExpMonth: expMonth,
-              cardExpYear: expYear,
-              status: "completed",
-              viewedByBuyer: true,
-              viewedBySeller: false,
-            });
-
-            bid.status = "paid";
-            await bid.save();
-
-            request.status = "completed";
-            await request.save();
-
-            await Bid.deleteMany({
-              requestId: request._id,
-              _id: { $ne: bid._id },
-            });
-
-            console.log("✅ Webhook completed receipt:", receiptDoc.receiptId);
-          }
-        }
-      }
+      // If you re-enable webhook route later, you can call completePaymentIntent logic here
+      // but since you removed the webhook route, this function is optional.
+      console.log("payment_intent.succeeded webhook received:", pi?.id);
     }
 
-    // Always return 200 so Stripe stops retrying
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error("stripeWebhook error:", err);
