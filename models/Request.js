@@ -17,13 +17,23 @@ const RequestSchema = new mongoose.Schema(
       postalCode: { type: String, required: false, default: "" },
     },
 
-    clientID: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    clientID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
 
-    // ✅ NEW: request lifecycle
     status: {
       type: String,
       enum: ["open", "completed", "cancelled"],
       default: "open",
+    },
+
+    // ✅ Track winning bid
+    winningBid: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Bid",
+      default: null,
     },
   },
   { timestamps: true }
