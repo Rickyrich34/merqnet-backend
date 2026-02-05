@@ -5,8 +5,6 @@ const Receipt = require("../models/Receipt");
 
 // ------------------------------------
 // Seller rating aggregation (FIXED)
-// - Matches sellerId as ObjectId (not string)
-// - Uses rating.value (same schema as MainDashboard)
 // ------------------------------------
 const RATING_AGG_MAX_MS = 8000;
 
@@ -26,7 +24,6 @@ function toObjectIdSafe(id) {
 async function buildSellerRatingMap(sellerIds) {
   if (!sellerIds || sellerIds.length === 0) return {};
 
-  // ✅ Convert to ObjectIds for correct Mongo matching
   const sellerObjectIds = sellerIds
     .map((id) => toObjectIdSafe(id))
     .filter(Boolean);
@@ -58,7 +55,7 @@ async function buildSellerRatingMap(sellerIds) {
       return acc;
     }, {});
   } catch (err) {
-    console.warn("buildSellerRatingMap fallback (aggregation skipped):", err?.message || err);
+    console.warn("buildSellerRatingMap fallback:", err?.message || err);
     return {};
   }
 }
@@ -103,6 +100,13 @@ exports.createBid = async (req, res) => {
     const request = await Request.findById(requestId);
     if (!request) {
       return res.status(404).json({ message: "Request not found" });
+    }
+
+    // ✅ BLOCK bids if request already closed
+    if (request.status !== "open") {
+      return res.status(400).json({
+        message: "This request is closed and cannot receive more bids",
+      });
     }
 
     const deliveryClean =
@@ -173,7 +177,6 @@ exports.getBidsByRequest = async (req, res) => {
       .populate("sellerId", "email fullName")
       .sort({ createdAt: 1 });
 
-    // ✅ keep ids as ObjectId (not String)
     const sellerIds = [
       ...new Set(
         bids
@@ -222,11 +225,42 @@ exports.acceptBid = async (req, res) => {
     const bid = await Bid.findById(bidId);
     if (!bid) return res.status(404).json({ message: "Bid not found" });
 
+    const request = await Request.findById(bid.requestId);
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    // ✅ BLOCK double acceptance
+    if (request.status !== "open") {
+      return res.status(400).json({
+        message: "This request is already awarded",
+      });
+    }
+
+    // ✅ Accept bid
     bid.accepted = true;
     bid.acceptedAt = new Date();
     bid.status = "pending_payment";
 
     await bid.save();
+
+    // ✅ Close request
+    request.status = "completed";
+    request.winningBid = bid._id;
+
+    await request.save();
+
+    // ✅ Reject other bids
+    await Bid.updateMany(
+      {
+        requestId: request._id,
+        _id: { $ne: bid._id },
+      },
+      {
+        status: "rejected",
+        accepted: false,
+      }
+    );
 
     res.json({ message: "Bid accepted", bid });
   } catch (err) {
