@@ -16,26 +16,54 @@ const ReceiptSchema = new Schema(
   {
     receiptId: { type: String, required: true, unique: true, index: true },
 
-    requestId: { type: Schema.Types.ObjectId, ref: "Request", required: true, index: true },
-    bidId: { type: Schema.Types.ObjectId, ref: "Bid", required: true, index: true },
+    requestId: {
+      type: Schema.Types.ObjectId,
+      ref: "Request",
+      required: true,
+      index: true,
+    },
 
-    buyerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    sellerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    bidId: {
+      type: Schema.Types.ObjectId,
+      ref: "Bid",
+      required: true,
+      index: true,
+    },
+
+    buyerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    sellerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
 
     amount: { type: Number, required: true },
     currency: { type: String, default: "usd" },
 
+    // ✅ SNAPSHOT: product name for reliable display
+    productName: {
+      type: String,
+      default: "",
+    },
+
     // Stripe charge id
     stripeChargeId: { type: String, default: "" },
 
-    // ✅ NEW: Stripe identifiers
+    // Stripe identifiers
     stripePaymentIntentId: { type: String, default: null },
     stripePaymentMethodId: { type: String, default: null },
 
-    // ✅ NEW: friendly payment method display
+    // Friendly payment method display
     paymentMethod: { type: String, default: null },
 
-    // ✅ NEW: card snapshot (for receipts)
+    // Card snapshot (for receipts)
     cardBrand: { type: String, default: null },
     cardLast4: { type: String, default: null },
     cardExpMonth: { type: Number, default: null },
@@ -58,7 +86,7 @@ const ReceiptSchema = new Schema(
   { timestamps: true }
 );
 
-// ✅ Compound index to speed up seller-rating aggregation (safe + backward compatible)
+// Compound index to speed up seller-rating aggregation
 ReceiptSchema.index({ sellerId: 1, "rating.value": 1, createdAt: -1 });
 
 module.exports = mongoose.model("Receipt", ReceiptSchema);
