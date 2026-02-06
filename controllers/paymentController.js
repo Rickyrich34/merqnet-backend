@@ -166,31 +166,34 @@ exports.payNow = async (req, res) => {
       sellerId: bid.sellerId,
 
       amount: total,
-      currency: "usd",
+      receiptId: makeReceiptId(),
 
-      stripeChargeId: charge.id,
+  requestId: request._id,
+  bidId: bid._id,
 
-      paymentMethod:
-        brand && last4 ? `${brand} •••• ${last4}` : null,
+  buyerId: buyer._id,
+  sellerId: bid.sellerId,
 
-      cardBrand: brand,
-      cardLast4: last4,
+  // ✅ SNAPSHOT DEL PRODUCTO
+  productName: request.productName,
 
-      status: "completed",
+  amount,
+  currency: pi.currency || "usd",
 
-      viewedByBuyer: true,
-      viewedBySeller: false,
-    });
+  stripeChargeId: charge?.id || null,
+  stripePaymentIntentId: pi.id,
+  stripePaymentMethodId: pi.payment_method || null,
 
-    bid.status = "paid";
-    await bid.save();
+  paymentMethod: paymentMethodLabel,
 
-    request.status = "completed";
-    await request.save();
+  cardBrand: brand,
+  cardLast4: last4,
+  cardExpMonth: expMonth,
+  cardExpYear: expYear,
 
-    await Bid.deleteMany({
-      requestId: request._id,
-      _id: { $ne: bid._id },
+  status: "completed",
+  viewedByBuyer: true,
+  viewedBySeller: false,
     });
 
     return res.status(200).json({
