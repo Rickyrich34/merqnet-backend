@@ -40,21 +40,24 @@ function isParty(receipt, userId) {
 
 // Find by Mongo _id OR receiptId
 async function findReceiptByParamId(id) {
-  let receipt = null;
+  let query = null;
 
   if (mongoose.Types.ObjectId.isValid(id)) {
-    receipt = await Receipt.findById(id)
-  .populate("requestId", "productName name")
-  .populate("buyerId", "fullName email")
-  .populate("sellerId", "fullName email");
+    query = Receipt.findById(id);
+  } else {
+    query = Receipt.findOne({ receiptId: id });
   }
 
-  if (!receipt) {
-    receipt = await Receipt.findOne({ receiptId: id });
-  }
+  if (!query) return null;
+
+  const receipt = await query
+    .populate("requestId", "productName category quantity")
+    .populate("buyerId", "fullName email")
+    .populate("sellerId", "fullName email");
 
   return receipt;
 }
+
 
 function round1(n) {
   return Math.round(n * 10) / 10;
