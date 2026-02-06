@@ -43,7 +43,10 @@ async function findReceiptByParamId(id) {
   let receipt = null;
 
   if (mongoose.Types.ObjectId.isValid(id)) {
-    receipt = await Receipt.findById(id);
+    receipt = await Receipt.findById(id)
+  .populate("requestId", "productName name")
+  .populate("buyerId", "fullName email")
+  .populate("sellerId", "fullName email");
   }
 
   if (!receipt) {
