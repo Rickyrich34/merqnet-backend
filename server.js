@@ -100,7 +100,12 @@ app.post(
   "/api/webhooks/stripe",
   express.raw({ type: "application/json" }),
   paymentController.stripeWebhook
+
+  // Stripe webhook disabled (not required)
+
 );
+
+
 
 // Body parsing (for all other routes)
 app.use(express.json({ limit: "10mb" }));
