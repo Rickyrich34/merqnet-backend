@@ -4,28 +4,29 @@ const router = express.Router();
 const paymentController = require("../controllers/paymentController");
 const { protect } = require("../middleware/authMiddleware");
 
-// Everything below requires auth
+// All routes require auth
 router.use(protect);
 
-// Cards
+/* =========================
+   CARDS
+========================= */
+
 router.get("/cards", paymentController.getCards);
 router.post("/cards", paymentController.addCard);
 router.delete("/cards/:cardId", paymentController.deleteCard);
-router.patch("/cards/:cardId/default", paymentController.setDefaultCard);
 
-// Legacy pay
-router.post("/pay", paymentController.payNow);
+/* =========================
+   PAYMENT INTENT (MODERN FLOW)
+========================= */
 
-// Payment Intent
 router.post(
   "/create-payment-intent",
   paymentController.createPaymentIntent
 );
 
-// Stripe Connect
 router.post(
-  "/connect/onboarding",
-  paymentController.createConnectOnboardingLink
+  "/complete-payment",
+  paymentController.completePaymentIntent
 );
 
 module.exports = router;
