@@ -38,7 +38,7 @@ function isParty(receipt, userId) {
   return buyerId === uid || sellerId === uid;
 }
 
-// Find by Mongo _id OR receiptId like "REC-831060"
+// Find by Mongo _id OR receiptId
 async function findReceiptByParamId(id) {
   let receipt = null;
 
@@ -80,11 +80,9 @@ function parsePage(req) {
 }
 
 /* ================================================= */
-/* ================= CREATE RECEIPT ================= */
+/* ================= CREATE ======================== */
 /* ================================================= */
 
-// POST /api/receipts/create
-// Called after successful payment
 exports.createReceipt = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
@@ -95,7 +93,6 @@ exports.createReceipt = async (req, res) => {
 
     const body = req.body || {};
 
-    // We do NOT invent fields — just accept what frontend sends
     const receipt = new Receipt({
       ...body,
       buyerId: userId,
@@ -120,22 +117,18 @@ exports.createReceipt = async (req, res) => {
 };
 
 /* ================================================= */
-/* ================= GET BUYER ================= */
+/* ================= GET BUYER ===================== */
 /* ================================================= */
 
 exports.getBuyerReceipts = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const onlyUnviewed = String(req.query.unviewed) === "true";
-
     const limit = parseLimit(req);
-
     const page = parsePage(req);
-
     const skip = limit ? (page - 1) * limit : 0;
 
     const filter = { buyerId: userId };
@@ -159,22 +152,18 @@ exports.getBuyerReceipts = async (req, res) => {
 };
 
 /* ================================================= */
-/* ================= GET SELLER ================= */
+/* ================= GET SELLER ==================== */
 /* ================================================= */
 
 exports.getSellerReceipts = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const onlyUnviewed = String(req.query.unviewed) === "true";
-
     const limit = parseLimit(req);
-
     const page = parsePage(req);
-
     const skip = limit ? (page - 1) * limit : 0;
 
     const filter = { sellerId: userId };
@@ -198,37 +187,30 @@ exports.getSellerReceipts = async (req, res) => {
 };
 
 /* ================================================= */
-/* ================= GET ONE ================= */
+/* ================= GET ONE ======================= */
 /* ================================================= */
 
 exports.getReceipt = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { id } = req.params;
 
-    let receipt = null;
-
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      receipt = await populateReceiptQuery(
-        Receipt.findById(id)
-      );
-    }
+    let receipt = await findReceiptByParamId(id);
 
     if (!receipt) {
-      receipt = await populateReceiptQuery(
-        Receipt.findOne({ receiptId: id })
-      );
+      return res.status(404).json({ message: "Receipt not found" });
     }
 
-    if (!receipt)
-      return res.status(404).json({ message: "Receipt not found" });
+    receipt = await populateReceiptQuery(
+      Receipt.findById(receipt._id)
+    );
 
-    if (!isParty(receipt, userId))
+    if (!isParty(receipt, userId)) {
       return res.status(403).json({ message: "Forbidden" });
+    }
 
     return res.status(200).json(receipt);
   } catch (err) {
@@ -241,53 +223,29 @@ exports.getReceipt = async (req, res) => {
 };
 
 /* ================================================= */
-/* ================= VIEWED ================= */
+/* ================= VIEWED ======================== */
 /* ================================================= */
 
 exports.markViewed = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { id } = req.params;
-
     const { userType } = req.body || {};
 
-    if (!userType || !["buyer", "seller"].includes(userType)) {
-      return res
-        .status(400)
-        .json({ message: "Missing userType (buyer|seller)" });
+    if (!["buyer", "seller"].includes(userType)) {
+      return res.status(400).json({ message: "Invalid userType" });
     }
 
-    let receipt = null;
-
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      receipt = await Receipt.findById(id);
-    }
+    const receipt = await findReceiptByParamId(id);
 
     if (!receipt) {
-      receipt = await Receipt.findOne({ receiptId: id });
+      return res.status(404).json({ message: "Receipt not found" });
     }
 
-    if (!receipt)
-      return res.status(404).json({ message: "Receipt not found" });
-
-    const uid = String(userId);
-
-    const buyerId = String(receipt.buyerId);
-
-    const sellerId = String(receipt.sellerId);
-
-    if (userType === "buyer" && buyerId !== uid)
-      return res.status(403).json({ message: "Forbidden" });
-
-    if (userType === "seller" && sellerId !== uid)
-      return res.status(403).json({ message: "Forbidden" });
-
     if (userType === "buyer") receipt.viewedByBuyer = true;
-
     if (userType === "seller") receipt.viewedBySeller = true;
 
     await receipt.save();
@@ -307,22 +265,19 @@ exports.markViewed = async (req, res) => {
 };
 
 /* ================================================= */
-/* ================= MARK ALL ================= */
+/* ================= MARK ALL ====================== */
 /* ================================================= */
 
 exports.markAllViewed = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { userType } = req.body || {};
 
-    if (!userType || !["buyer", "seller"].includes(userType)) {
-      return res
-        .status(400)
-        .json({ message: "Missing userType (buyer|seller)" });
+    if (!["buyer", "seller"].includes(userType)) {
+      return res.status(400).json({ message: "Invalid userType" });
     }
 
     const filter =
@@ -348,35 +303,75 @@ exports.markAllViewed = async (req, res) => {
 };
 
 /* ================================================= */
-/* ================= COMPLETE ================= */
+/* ============ MARK VIEWED ALL (ALIASES) =========== */
+/* ================================================= */
+
+exports.markViewedBuyerAll = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    await Receipt.updateMany(
+      { buyerId: userId, viewedByBuyer: false },
+      { $set: { viewedByBuyer: true } }
+    );
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error("markViewedBuyerAll error:", err);
+
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+exports.markViewedSellerAll = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    await Receipt.updateMany(
+      { sellerId: userId, viewedBySeller: false },
+      { $set: { viewedBySeller: true } }
+    );
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error("markViewedSellerAll error:", err);
+
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+/* ================================================= */
+/* ================= COMPLETE ====================== */
 /* ================================================= */
 
 exports.completeReceipt = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { id } = req.params;
 
     const receipt = await findReceiptByParamId(id);
 
-    if (!receipt)
+    if (!receipt) {
       return res.status(404).json({ message: "Receipt not found" });
-
-    if (String(receipt.buyerId) !== String(userId)) {
-      return res.status(403).json({
-        message: "Only the buyer can mark this as completed",
-      });
     }
 
-    const currentStatus = String(receipt.status || "").toLowerCase();
+    if (String(receipt.buyerId) !== String(userId)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
 
-    if (currentStatus !== "paid") {
-      return res.status(400).json({
-        message: "Only paid receipts can be completed",
-      });
+    if (String(receipt.status).toLowerCase() !== "paid") {
+      return res.status(400).json({ message: "Not paid" });
     }
 
     receipt.status = "completed";
@@ -388,108 +383,79 @@ exports.completeReceipt = async (req, res) => {
     );
 
     return res.status(200).json({
-      message: "Receipt marked as completed",
       receipt: populated,
     });
   } catch (err) {
     console.error("completeReceipt error:", err);
 
     return res.status(500).json({
-      message: "Server error completing receipt",
+      message: "Server error",
     });
   }
 };
 
 /* ================================================= */
-/* ================= RATE ================= */
+/* ================= RATE ========================== */
 /* ================================================= */
 
 exports.rateReceipt = async (req, res) => {
   try {
     const userId = getAuthUserId(req);
 
-    if (!userId)
-      return res.status(401).json({ message: "Unauthorized" });
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const { id } = req.params;
-
     const { value, reasons = [], comment = "" } = req.body || {};
 
     const numeric = Number(value);
 
-    if (!Number.isFinite(numeric))
-      return res.status(400).json({ message: "Invalid rating value" });
+    if (!Number.isFinite(numeric)) {
+      return res.status(400).json({ message: "Invalid rating" });
+    }
 
     const v = clamp(round1(numeric), 1.0, 10.0);
 
-    const safeReasons = Array.isArray(reasons)
-      ? reasons.map((x) => String(x)).slice(0, 10)
-      : [];
-
-    const safeComment = String(comment || "")
-      .trim()
-      .slice(0, 200);
-
     const receipt = await findReceiptByParamId(id);
 
-    if (!receipt)
+    if (!receipt) {
       return res.status(404).json({ message: "Receipt not found" });
-
-    if (String(receipt.buyerId) !== String(userId)) {
-      return res.status(403).json({
-        message: "Only the buyer can rate this receipt",
-      });
     }
 
-    const currentStatusLower = String(receipt.status || "").toLowerCase();
-
-    if (currentStatusLower !== "completed") {
-      return res.status(400).json({
-        message: "Receipt must be completed before rating",
-      });
+    if (String(receipt.status).toLowerCase() !== "completed") {
+      return res.status(400).json({ message: "Not completed" });
     }
 
-    if (receipt.rating && receipt.rating.value) {
-      return res.status(400).json({
-        message: "This receipt is already rated",
-      });
+    if (receipt.rating?.value) {
+      return res.status(400).json({ message: "Already rated" });
     }
 
     const ratingPayload = {
       value: v,
-      reasons: safeReasons,
-      comment: safeComment,
+      reasons,
+      comment,
       ratedAt: new Date(),
       ratedBy: userId,
     };
 
-    await Receipt.findByIdAndUpdate(
-      receipt._id,
-      {
-        $set: {
-          status: "completed",
-          rating: ratingPayload,
-        },
+    await Receipt.findByIdAndUpdate(receipt._id, {
+      $set: {
+        rating: ratingPayload,
+        status: "completed",
       },
-      {
-        new: true,
-        runValidators: false,
-      }
-    );
+    });
 
     const populated = await populateReceiptQuery(
       Receipt.findById(receipt._id)
     );
 
     return res.status(200).json({
-      message: "Rating saved",
       receipt: populated,
     });
   } catch (err) {
     console.error("rateReceipt error:", err);
 
     return res.status(500).json({
-      message: "Server error saving rating",
+      message: "Server error",
     });
   }
 };

@@ -1,33 +1,101 @@
-// backend/routes/receiptRoutes.js
 const express = require("express");
 const router = express.Router();
 
 const { protect } = require("../middleware/authMiddleware");
+
 const receiptController = require("../controllers/receiptController");
 
-// Buyer receipts (supports ?unviewed=true and ?limit=1)
-router.get("/buyer", protect, receiptController.getBuyerReceipts);
+/* ================= SAFETY CHECK ================= */
 
-// Seller receipts (supports ?unviewed=true and ?limit=1)
-router.get("/seller", protect, receiptController.getSellerReceipts);
+function safe(fn) {
+  if (typeof fn !== "function") {
+    return (req, res) =>
+      res.status(500).json({ message: "Route handler missing" });
+  }
+  return fn;
+}
 
-// These are used by your frontend (History + Dashboard clear)
-router.put("/mark-all", protect, receiptController.markAllViewed);
-router.put("/mark-viewed/buyer", protect, receiptController.markViewedBuyerAll);
-router.put("/mark-viewed/seller", protect, receiptController.markViewedSellerAll);
+/* ================= ROUTES ================= */
 
-// Backwards-compat aliases (your frontend calls these too)
-router.put("/markViewed/buyer", protect, receiptController.markViewedBuyerAll);
-router.put("/markViewed/seller", protect, receiptController.markViewedSellerAll);
+// Buyer receipts
+router.get(
+  "/buyer",
+  protect,
+  safe(receiptController.getBuyerReceipts)
+);
 
-// MUST be before "/:id"
-router.patch("/:id/complete", protect, receiptController.completeReceipt);
-router.post("/:id/rate", protect, receiptController.rateReceipt);
+// Seller receipts
+router.get(
+  "/seller",
+  protect,
+  safe(receiptController.getSellerReceipts)
+);
 
-// Get ONE receipt by either Mongo _id OR receiptId
-router.get("/:id", protect, receiptController.getReceipt);
+// Mark all
+router.put(
+  "/mark-all",
+  protect,
+  safe(receiptController.markAllViewed)
+);
 
-// Mark receipt viewed (single)
-router.put("/:id/viewed", protect, receiptController.markViewed);
+// Mark viewed aliases
+router.put(
+  "/mark-viewed/buyer",
+  protect,
+  safe(receiptController.markViewedBuyerAll)
+);
+
+router.put(
+  "/mark-viewed/seller",
+  protect,
+  safe(receiptController.markViewedSellerAll)
+);
+
+router.put(
+  "/markViewed/buyer",
+  protect,
+  safe(receiptController.markViewedBuyerAll)
+);
+
+router.put(
+  "/markViewed/seller",
+  protect,
+  safe(receiptController.markViewedSellerAll)
+);
+
+// Create receipt
+router.post(
+  "/create",
+  protect,
+  safe(receiptController.createReceipt)
+);
+
+// Complete
+router.patch(
+  "/:id/complete",
+  protect,
+  safe(receiptController.completeReceipt)
+);
+
+// Rate
+router.post(
+  "/:id/rate",
+  protect,
+  safe(receiptController.rateReceipt)
+);
+
+// Get one
+router.get(
+  "/:id",
+  protect,
+  safe(receiptController.getReceipt)
+);
+
+// Mark viewed single
+router.put(
+  "/:id/viewed",
+  protect,
+  safe(receiptController.markViewed)
+);
 
 module.exports = router;
