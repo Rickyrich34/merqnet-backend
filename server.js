@@ -4,148 +4,140 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 
-// ✅ NEW: Stripe webhook handler lives in paymentController (no new webhookRoutes file)
-const paymentController = require("./controllers/paymentController");
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Railway proxy support (safe for cookies / headers / https behind proxy)
+/* ===============================
+   BASIC SETUP
+================================ */
+
 app.set("trust proxy", 1);
 
-/**
- * CORS
- * - Allows localhost dev (5173/3000)
- * - Allows your Railway frontend domain(s)
- * - Allows custom domains
- * - Echoes the request Origin (so credentials can work)
- *
- * Env options supported:
- * - FRONTEND_URL (single origin)
- * - CORS_ORIGIN  (single origin)
- * - CORS_ORIGINS (comma-separated origins)
- */
-function normalizeOrigin(o) {
-  if (!o || typeof o !== "string") return "";
-  return o.trim().replace(/\/$/, "");
-}
-
-const fromSingle =
-  normalizeOrigin(process.env.FRONTEND_URL) ||
-  normalizeOrigin(process.env.CORS_ORIGIN);
-
-const fromList = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map(normalizeOrigin)
-  .filter(Boolean);
-
-const allowedOrigins = [
-  fromSingle,
-  ...fromList,
-
-  // Local dev
-  "http://localhost:5173",
-  "http://localhost:3000",
-
-  // Your known domains (adjust if needed)
-  "https://merqnet-frontend-production.up.railway.app",
-  "https://app.merqnet.com",
-  "https://merqnet.com",
-  "https://www.merqnet.com",
-].filter(Boolean);
-
-function isRailwayDomain(origin) {
-  try {
-    const u = new URL(origin);
-    return u.protocol === "https:" && u.hostname.endsWith(".up.railway.app");
-  } catch {
-    return false;
-  }
-}
-
-// IMPORTANT: CORS must run before routes
-const corsOptions = {
-  origin: (origin, cb) => {
-    // Non-browser requests (curl/postman/server-to-server)
-    if (!origin) return cb(null, true);
-
-    const clean = normalizeOrigin(origin);
-
-    // Allow listed origins + any Railway domain
-    if (allowedOrigins.includes(clean) || isRailwayDomain(clean)) {
-      return cb(null, true);
-    }
-
-    // Instead of throwing (which can remove headers),
-    // we hard-deny with false.
-    return cb(null, false);
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Stripe-Signature"],
-  optionsSuccessStatus: 204,
-};
-
-app.use(cors(corsOptions));
-
-// Preflight (USE SAME OPTIONS - do NOT use cors() default here)
-app.options("*", cors(corsOptions));
-
-/**
- * ✅ STRIPE WEBHOOK
- * MUST be raw body so Stripe signature verification works.
- * This must be defined BEFORE express.json().
- */
-app.post(
- 
-
-  // Stripe webhook disabled (not required)
-
-);
-
-
-
-// Body parsing (for all other routes)
+app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Mongo (support both var names)
+/* ===============================
+   MONGO
+================================ */
+
 const MONGO_URI =
-  process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL;
+  process.env.MONGODB_URI ||
+  process.env.MONGO_URI ||
+  process.env.MONGO_URL;
 
 if (!MONGO_URI) {
-  console.error(
-    "❌ Missing Mongo connection string. Set MONGODB_URI (or MONGO_URI)."
-  );
+  console.error("❌ Missing Mongo connection string");
 } else {
   mongoose
     .connect(MONGO_URI)
-    .then(() => console.log("✅ Connected to MongoDB"))
-    .catch((err) => console.error("❌ MongoDB connection error:", err));
+    .then(() => console.log("✅ Mongo connected"))
+    .catch((err) => console.error("❌ Mongo error:", err));
 }
 
-// ROUTES — keep existing
-app.use("/api/users", require("./routes/userRoutes"));
-app.use("/api/products", require("./routes/productRoutes"));
-app.use("/api/profile", require("./routes/profileRoutes"));
-app.use("/api/requests", require("./routes/requestRoutes"));
-app.use("/api/bids", require("./routes/bidRoutes"));
-app.use("/api/payments", require("./routes/paymentRoutes"));
-app.use("/api/receipts", require("./routes/receiptRoutes"));
-app.use("/api/dashboard", require("./routes/dashboardRoutes"));
-app.use("/api/matches", require("./routes/matchRoutes"));
-app.use("/api/messages", require("./routes/messageRoutes"));
-app.use("/api/notifications", require("./routes/notificationRoutes"));
+/* ===============================
+   DEBUG ROUTE LOADING
+================================ */
 
-// ROOT TEST
+console.log("🚀 SERVER STARTING...");
+console.log("📦 LOADING ROUTES...");
+
+/* ===============================
+   ROUTES (WITH LOGGING)
+================================ */
+
+try {
+  console.log("➡️ users");
+  app.use("/api/users", require("./routes/userRoutes"));
+} catch (e) {
+  console.error("❌ users route failed:", e);
+}
+
+try {
+  console.log("➡️ products");
+  app.use("/api/products", require("./routes/productRoutes"));
+} catch (e) {
+  console.error("❌ products route failed:", e);
+}
+
+try {
+  console.log("➡️ profile");
+  app.use("/api/profile", require("./routes/profileRoutes"));
+} catch (e) {
+  console.error("❌ profile route failed:", e);
+}
+
+try {
+  console.log("➡️ requests");
+  app.use("/api/requests", require("./routes/requestRoutes"));
+} catch (e) {
+  console.error("❌ requests route failed:", e);
+}
+
+try {
+  console.log("➡️ bids");
+  app.use("/api/bids", require("./routes/bidRoutes"));
+} catch (e) {
+  console.error("❌ bids route failed:", e);
+}
+
+try {
+  console.log("➡️ payments");
+  app.use("/api/payments", require("./routes/paymentRoutes"));
+} catch (e) {
+  console.error("❌ payments route failed:", e);
+}
+
+try {
+  console.log("➡️ receipts");
+  app.use("/api/receipts", require("./routes/receiptRoutes"));
+} catch (e) {
+  console.error("❌ receipts route failed:", e);
+}
+
+try {
+  console.log("➡️ dashboard");
+  app.use("/api/dashboard", require("./routes/dashboardRoutes"));
+} catch (e) {
+  console.error("❌ dashboard route failed:", e);
+}
+
+try {
+  console.log("➡️ matches");
+  app.use("/api/matches", require("./routes/matchRoutes"));
+} catch (e) {
+  console.error("❌ matches route failed:", e);
+}
+
+try {
+  console.log("➡️ messages");
+  app.use("/api/messages", require("./routes/messageRoutes"));
+} catch (e) {
+  console.error("❌ messages route failed:", e);
+}
+
+try {
+  console.log("➡️ notifications");
+  app.use("/api/notifications", require("./routes/notificationRoutes"));
+} catch (e) {
+  console.error("❌ notifications route failed:", e);
+}
+
+/* ===============================
+   TEST + FALLBACK
+================================ */
+
 app.get("/", (req, res) => {
   res.send("MerqNet API is running.");
 });
 
-// 404
 app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
+
+/* ===============================
+   START SERVER
+================================ */
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
