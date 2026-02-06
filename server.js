@@ -97,9 +97,7 @@ app.options("*", cors(corsOptions));
  * This must be defined BEFORE express.json().
  */
 app.post(
-  "/api/webhooks/stripe",
-  express.raw({ type: "application/json" }),
-  paymentController.stripeWebhook
+ 
 
   // Stripe webhook disabled (not required)
 
