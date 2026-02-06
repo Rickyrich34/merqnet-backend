@@ -7,19 +7,23 @@ const { protect } = require("../middleware/authMiddleware");
 // Everything below requires auth
 router.use(protect);
 
-// Cards CRUD
-router.get("/cards", paymentController.getCards);
-router.post("/cards", paymentController.addCard);
-router.delete("/cards/:cardId", paymentController.deleteCard);
-router.patch("/cards/:cardId/default", paymentController.setDefaultCard);
+/* ===============================
+   PAYMENTS
+================================ */
 
-// Legacy Payment (kept for backward compatibility)
+// Legacy Payment
 router.post("/pay", paymentController.payNow);
 
-// ✅ NEW: PaymentIntent checkout (Apple Pay / Google Pay / etc.)
-router.post("/create-payment-intent", paymentController.createPaymentIntent);
+// Stripe PaymentIntent
+router.post(
+  "/create-payment-intent",
+  paymentController.createPaymentIntent
+);
 
-// ✅ NEW: Seller Connect onboarding
-router.post("/connect/onboarding", paymentController.createConnectOnboardingLink);
+// Complete PaymentIntent
+router.post(
+  "/complete-payment-intent",
+  paymentController.completePaymentIntent
+);
 
 module.exports = router;
