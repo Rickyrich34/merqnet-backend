@@ -14,6 +14,8 @@ const makeReceiptId = () =>
 // ✅ 8% platform fee
 const PLATFORM_FEE_BPS = 800;
 
+/* ================= HELPERS ================= */
+
 function stripeErrMessage(err) {
   return err?.raw?.message || err?.message || "Stripe error";
 }
@@ -30,15 +32,12 @@ function calcFeeCents(amountCents) {
 async function ensureStripeCustomer(user) {
   if (user.stripeCustomerId) {
     try {
-      const existing = await stripe.customers.retrieve(
-        user.stripeCustomerId
-      );
+      const existing = await stripe.customers.retrieve(user.stripeCustomerId);
       if (existing && existing.id) return user.stripeCustomerId;
     } catch (e) {
       const msg = String(stripeErrMessage(e) || "");
       const isMissing =
-        e?.raw?.code === "resource_missing" ||
-        /no such customer/i.test(msg);
+        e?.raw?.code === "resource_missing" || /no such customer/i.test(msg);
 
       if (!isMissing) throw e;
     }
@@ -102,9 +101,7 @@ exports.payNow = async (req, res) => {
       return res.status(404).json({ message: "Request not found" });
 
     if (String(request.clientID) !== String(user._id)) {
-      return res
-        .status(403)
-        .json({ message: "Forbidden" });
+      return res.status(403).json({ message: "Forbidden" });
     }
 
     const bid = await Bid.findById(bidId);
@@ -112,9 +109,7 @@ exports.payNow = async (req, res) => {
       return res.status(404).json({ message: "Bid not found" });
 
     if (!bid.accepted)
-      return res
-        .status(400)
-        .json({ message: "Bid not accepted" });
+      return res.status(400).json({ message: "Bid not accepted" });
 
     const existing = await Receipt.findOne({
       bidId: bid._id,
@@ -140,9 +135,7 @@ exports.payNow = async (req, res) => {
     const total = Number(bid.totalPrice);
 
     if (!Number.isFinite(total) || total <= 0) {
-      return res
-        .status(400)
-        .json({ message: "Invalid price" });
+      return res.status(400).json({ message: "Invalid price" });
     }
 
     const amountCents = Math.round(total * 100);
@@ -154,7 +147,7 @@ exports.payNow = async (req, res) => {
       amount: amountCents,
       currency: "usd",
       customer: customerId,
-      description: `MerqNet payment`,
+      description: "MerqNet payment",
     });
 
     const card = charge?.payment_method_details?.card || {};
@@ -162,7 +155,7 @@ exports.payNow = async (req, res) => {
     const brand = card.brand?.toUpperCase() || null;
     const last4 = card.last4 || null;
 
-    // ✅ CREATE RECEIPT (WITH PRODUCT NAME)
+    // ✅ CREATE RECEIPT (NO INVALID FIELDS)
     const receiptDoc = await Receipt.create({
       receiptId: makeReceiptId(),
 
@@ -171,9 +164,6 @@ exports.payNow = async (req, res) => {
 
       buyerId: user._id,
       sellerId: bid.sellerId,
-
-      // ✅ IMPORTANT
-      productName: request.productName,
 
       amount: total,
       currency: "usd",
@@ -214,7 +204,7 @@ exports.payNow = async (req, res) => {
 };
 
 /* ==========================================================
-   PAYMENT INTENT FLOW
+   CREATE PAYMENT INTENT
 ========================================================== */
 
 exports.createPaymentIntent = async (req, res) => {
@@ -226,9 +216,7 @@ exports.createPaymentIntent = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
 
     if (!requestId || !bidId)
-      return res
-        .status(400)
-        .json({ message: "Missing ids" });
+      return res.status(400).json({ message: "Missing ids" });
 
     const buyer = await User.findById(userId);
     if (!buyer)
@@ -243,16 +231,12 @@ exports.createPaymentIntent = async (req, res) => {
       return res.status(404).json({ message: "Bid not found" });
 
     if (!bid.accepted)
-      return res
-        .status(400)
-        .json({ message: "Bid not accepted" });
+      return res.status(400).json({ message: "Bid not accepted" });
 
     const total = Number(bid.totalPrice);
 
     if (!Number.isFinite(total) || total <= 0) {
-      return res
-        .status(400)
-        .json({ message: "Invalid price" });
+      return res.status(400).json({ message: "Invalid price" });
     }
 
     const amountCents = Math.round(total * 100);
@@ -275,10 +259,7 @@ exports.createPaymentIntent = async (req, res) => {
 
       automatic_payment_methods: { enabled: true },
 
-      application_fee_amount: Math.min(
-        feeCents,
-        amountCents
-      ),
+      application_fee_amount: Math.min(feeCents, amountCents),
 
       transfer_data: {
         destination: seller.stripeConnectAccountId,
@@ -320,25 +301,18 @@ exports.completePaymentIntent = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized" });
 
     if (!paymentIntentId)
-      return res
-        .status(400)
-        .json({ message: "Missing paymentIntentId" });
+      return res.status(400).json({ message: "Missing paymentIntentId" });
 
     const buyer = await User.findById(userId);
     if (!buyer)
       return res.status(404).json({ message: "User not found" });
 
-    const pi = await stripe.paymentIntents.retrieve(
-      paymentIntentId,
-      {
-        expand: ["charges.data.payment_method_details"],
-      }
-    );
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["charges.data.payment_method_details"],
+    });
 
     if (!pi || pi.status !== "succeeded") {
-      return res
-        .status(400)
-        .json({ message: "Payment not completed" });
+      return res.status(400).json({ message: "Payment not completed" });
     }
 
     const requestId = pi.metadata?.requestId;
@@ -348,9 +322,7 @@ exports.completePaymentIntent = async (req, res) => {
     const bid = await Bid.findById(bidId);
 
     if (!request || !bid) {
-      return res
-        .status(404)
-        .json({ message: "Data missing" });
+      return res.status(404).json({ message: "Data missing" });
     }
 
     const charge = pi.charges.data[0];
@@ -361,7 +333,7 @@ exports.completePaymentIntent = async (req, res) => {
 
     const amount = Number(pi.amount_received) / 100;
 
-    // ✅ CREATE RECEIPT (WITH PRODUCT NAME)
+    // ✅ CREATE RECEIPT (NO INVALID FIELDS)
     const receiptDoc = await Receipt.create({
       receiptId: makeReceiptId(),
 
@@ -370,9 +342,6 @@ exports.completePaymentIntent = async (req, res) => {
 
       buyerId: buyer._id,
       sellerId: bid.sellerId,
-
-      // ✅ IMPORTANT
-      productName: request.productName,
 
       amount,
       currency: pi.currency || "usd",
