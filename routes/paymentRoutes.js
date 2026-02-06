@@ -7,23 +7,25 @@ const { protect } = require("../middleware/authMiddleware");
 // Everything below requires auth
 router.use(protect);
 
-/* ===============================
-   PAYMENTS
-================================ */
+// Cards
+router.get("/cards", paymentController.getCards);
+router.post("/cards", paymentController.addCard);
+router.delete("/cards/:cardId", paymentController.deleteCard);
+router.patch("/cards/:cardId/default", paymentController.setDefaultCard);
 
-// Legacy Payment
+// Legacy pay
 router.post("/pay", paymentController.payNow);
 
-// Stripe PaymentIntent
+// Payment Intent
 router.post(
   "/create-payment-intent",
   paymentController.createPaymentIntent
 );
 
-// Complete PaymentIntent
+// Stripe Connect
 router.post(
-  "/complete-payment-intent",
-  paymentController.completePaymentIntent
+  "/connect/onboarding",
+  paymentController.createConnectOnboardingLink
 );
 
 module.exports = router;

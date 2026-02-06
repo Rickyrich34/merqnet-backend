@@ -2,10 +2,9 @@ const express = require("express");
 const router = express.Router();
 
 const { protect } = require("../middleware/authMiddleware");
-
 const receiptController = require("../controllers/receiptController");
 
-/* ================= SAFETY CHECK ================= */
+/* ================= SAFETY ================= */
 
 function safe(fn) {
   if (typeof fn !== "function") {
@@ -17,14 +16,14 @@ function safe(fn) {
 
 /* ================= ROUTES ================= */
 
-// Buyer receipts
+// Buyer
 router.get(
   "/buyer",
   protect,
   safe(receiptController.getBuyerReceipts)
 );
 
-// Seller receipts
+// Seller
 router.get(
   "/seller",
   protect,
@@ -38,7 +37,7 @@ router.put(
   safe(receiptController.markAllViewed)
 );
 
-// Mark viewed aliases
+// Mark viewed
 router.put(
   "/mark-viewed/buyer",
   protect,
@@ -49,32 +48,6 @@ router.put(
   "/mark-viewed/seller",
   protect,
   safe(receiptController.markViewedSellerAll)
-);
-
-router.put(
-  "/markViewed/buyer",
-  protect,
-  safe(receiptController.markViewedBuyerAll)
-);
-
-router.put(
-  "/markViewed/seller",
-  protect,
-  safe(receiptController.markViewedSellerAll)
-);
-
-// ✅ CREATE (RESTORED — FUNCTION EXISTS)
-router.post(
-  "/create",
-  protect,
-  safe(receiptController.createReceipt)
-);
-
-// Complete
-router.patch(
-  "/:id/complete",
-  protect,
-  safe(receiptController.completeReceipt)
 );
 
 // Rate
@@ -96,6 +69,13 @@ router.put(
   "/:id/viewed",
   protect,
   safe(receiptController.markViewed)
+);
+
+// Complete
+router.patch(
+  "/:id/complete",
+  protect,
+  safe(receiptController.completeReceipt)
 );
 
 module.exports = router;
