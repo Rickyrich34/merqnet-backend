@@ -63,7 +63,12 @@ router.put(
   safe(receiptController.markViewedSellerAll)
 );
 
-// ❌ REMOVED: /create (controller doesn't have createReceipt)
+// ✅ CREATE (RESTORED — FUNCTION EXISTS)
+router.post(
+  "/create",
+  protect,
+  safe(receiptController.createReceipt)
+);
 
 // Complete
 router.patch(
