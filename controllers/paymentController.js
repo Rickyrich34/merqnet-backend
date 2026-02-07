@@ -123,7 +123,6 @@ exports.deleteCard = async (req, res) => {
       (c) => String(c._id) !== String(cardId)
     );
 
-    // Reset default
     if (user.cards.length) {
       user.cards.forEach((c, i) => {
         c.isDefault = i === 0;
@@ -304,6 +303,62 @@ exports.completePaymentIntent = async (req, res) => {
     });
   } catch (err) {
     console.error("completePaymentIntent:", err);
+
+    return res.status(500).json({
+      message: stripeErrMessage(err),
+    });
+  }
+};
+
+/* ==========================================================
+   STRIPE CONNECT ONBOARDING (SELLERS)
+========================================================== */
+
+exports.startOnboarding = async (req, res) => {
+  try {
+    const userId = getAuthUserId(req);
+
+    if (!userId)
+      return res.status(401).json({ message: "Unauthorized" });
+
+    const user = await User.findById(userId);
+
+    if (!user)
+      return res.status(404).json({ message: "User not found" });
+
+    let accountId = user.stripeConnectAccountId;
+
+    if (!accountId) {
+      const account = await stripe.accounts.create({
+        type: "express",
+        email: user.email,
+        country: "US",
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+      });
+
+      accountId = account.id;
+
+      user.stripeConnectAccountId = accountId;
+      await user.save();
+    }
+
+    const accountLink = await stripe.accountLinks.create({
+      account: accountId,
+
+      refresh_url: `${process.env.FRONTEND_URL}/payout-setup`,
+      return_url: `${process.env.FRONTEND_URL}/dashboard`,
+
+      type: "account_onboarding",
+    });
+
+    return res.status(200).json({
+      url: accountLink.url,
+    });
+  } catch (err) {
+    console.error("startOnboarding:", err);
 
     return res.status(500).json({
       message: stripeErrMessage(err),
