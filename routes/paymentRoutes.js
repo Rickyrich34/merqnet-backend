@@ -16,17 +16,17 @@ router.post("/cards", paymentController.addCard);
 router.delete("/cards/:cardId", paymentController.deleteCard);
 
 /* =========================
+   STRIPE CONNECT (PAYOUT / SELLER ONBOARDING)
+========================= */
+
+router.post("/connect/onboarding", paymentController.startOnboarding);
+
+/* =========================
    PAYMENT INTENT (MODERN FLOW)
 ========================= */
 
-router.post(
-  "/create-payment-intent",
-  paymentController.createPaymentIntent
-);
+router.post("/create-payment-intent", paymentController.createPaymentIntent);
 
-router.post(
-  "/complete-payment",
-  paymentController.completePaymentIntent
-);
+router.post("/complete-payment", paymentController.completePaymentIntent);
 
 module.exports = router;
