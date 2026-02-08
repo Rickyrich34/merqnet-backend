@@ -345,11 +345,12 @@ exports.startOnboarding = async (req, res) => {
       await user.save();
     }
 
+    // ✅ FIXED RETURN URL
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
 
       refresh_url: `${process.env.FRONTEND_URL}/payout-setup`,
-      return_url: `${process.env.FRONTEND_URL}/dashboard`,
+      return_url: `${process.env.FRONTEND_URL}/payout-setup`,
 
       type: "account_onboarding",
     });
