@@ -1,7 +1,5 @@
 const { Resend } = require("resend");
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 exports.sendSupportEmail = async (req, res) => {
   try {
     const {
@@ -13,10 +11,19 @@ exports.sendSupportEmail = async (req, res) => {
       username,
     } = req.body;
 
+    if (!process.env.RESEND_API_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: "RESEND_API_KEY missing",
+      });
+    }
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+
     await resend.emails.send({
-      from: "MerqNet Support <support@merqnet.com>",
-      to: process.env.SUPPORT_TO_EMAIL,
-      reply_to: email,
+      from: "MerqNet Support <onboarding@resend.dev>", // 🔥 usa esto hasta verificar dominio
+      to: [process.env.SUPPORT_TO_EMAIL],
+      replyTo: email,
       subject: `[MerqNet Support] ${subject}`,
       text: `
 Issue Type: ${issueType}
