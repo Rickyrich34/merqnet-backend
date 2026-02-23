@@ -1,3 +1,5 @@
+console.log("RESEND KEY EXISTS:", !!process.env.RESEND_API_KEY);
+
 const { Resend } = require("resend");
 
 exports.sendSupportEmail = async (req, res) => {
