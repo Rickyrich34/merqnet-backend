@@ -41,10 +41,14 @@ ${message}
       message: "Support request sent successfully",
     });
   } catch (err) {
-    console.error("Resend error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to send support request",
-    });
-  }
+  console.error("Resend FULL error:", err);
+  console.error("Resend RESPONSE:", err?.response?.data);
+  console.error("Resend MESSAGE:", err?.message);
+
+  return res.status(500).json({
+    ok: false,
+    error: err?.response?.data?.message || err?.message || "Failed to send support request",
+  });
+}
+
 };
