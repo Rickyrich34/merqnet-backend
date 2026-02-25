@@ -12,11 +12,22 @@ router.post("/", async (req, res) => {
       from: "noreply@supportmerqnet.com",
       to: ["Rickyramz34@hotmail.com"],
       subject: `[${issueType}] ${subject}`,
-      text: `User: ${username}\nEmail: ${email}\nRequest ID: ${requestId}\n\nMessage:\n${message}\n`,
-      replyTo: email, // ✅ CORRECTO (no reply_to)
+      text:
+        `User: ${username}\n` +
+        `Email: ${email}\n` +
+        `Request ID: ${requestId}\n\n` +
+        `Message:\n${message}\n`,
+      replyTo: email,
     });
 
-    return res.json({ success: true, id: result?.id || null });
+    // Resend SDK puede devolver el id en diferentes shapes según versión
+    const id =
+      result?.id ||
+      result?.data?.id ||
+      (Array.isArray(result?.data) ? result.data[0]?.id : null) ||
+      null;
+
+    return res.json({ success: true, id });
   } catch (error) {
     console.error("Support email error:", error);
     return res.status(500).json({ error: "Email failed" });
