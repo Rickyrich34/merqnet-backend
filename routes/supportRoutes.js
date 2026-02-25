@@ -9,18 +9,18 @@ router.post("/", async (req, res) => {
     const { issueType, requestId, subject, message, email, username } = req.body;
 
     const result = await resend.emails.send({
-      from: "noreply@supportmerqnet.com",
+      // Nombre corto visible en móvil + email real del dominio
+      from: "MerqNet Support <noreply@supportmerqnet.com>",
       to: ["Rickyramz34@hotmail.com"],
-      subject: `[${issueType}] ${subject}`,
+      subject: `MerqNet Support • [${issueType}] ${subject}`,
       text:
         `User: ${username}\n` +
         `Email: ${email}\n` +
         `Request ID: ${requestId}\n\n` +
         `Message:\n${message}\n`,
-      replyTo: email,
+      replyTo: email, // correcto para que al responder vaya al email del usuario
     });
 
-    // Resend SDK puede devolver el id en diferentes shapes según versión
     const id =
       result?.id ||
       result?.data?.id ||
