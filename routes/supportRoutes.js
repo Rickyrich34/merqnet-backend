@@ -22,7 +22,7 @@ router.post("/", async (req, res) => {
     // 2️⃣ Enviar email
     const result = await resend.emails.send({
       from: "MerqNet Support <noreply@supportmerqnet.com>",
-      to: ["Rickyramz34@hotmail.com"],
+      to: [process.env.SUPPORT_TO_EMAIL], // 🔥 ya no hardcode
       subject: `MerqNet Support • [${issueType}] ${subject}`,
       text:
         `User: ${username}\n` +
@@ -32,9 +32,14 @@ router.post("/", async (req, res) => {
       replyTo: email,
     });
 
-    const id = result?.id || result?.data?.id || null;
+    const id = result?.id || null;
 
-    return res.json({ success: true, id, ticketId: saved._id });
+    return res.json({
+      success: true,
+      id,
+      ticketId: saved._id,
+    });
+
   } catch (error) {
     console.error("Support email error:", error);
     return res.status(500).json({ error: "Email failed" });
