@@ -349,8 +349,8 @@ exports.startOnboarding = async (req, res) => {
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
 
-      refresh_url: `${process.env.FRONTEND_URL}/payout-setup`,
-      return_url: `${process.env.FRONTEND_URL}/payout-setup`,
+      refresh_url: `${process.env.FRONTEND_URL}/payoutsetup`,
+      return_url: `${process.env.FRONTEND_URL}/payoutsetup`,
 
       type: "account_onboarding",
     });
