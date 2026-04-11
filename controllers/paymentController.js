@@ -90,8 +90,8 @@ exports.addCard = async (req, res) => {
       stripeSourceId,
       brand,
       last4,
-      expMonth,
-      expYear,
+      exp_month: expMonth ? Number(expMonth) : null,
+      exp_year: expYear ? Number(expYear) : null,
       isDefault: user.cards.length === 0,
     };
 
